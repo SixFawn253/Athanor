@@ -1,0 +1,29 @@
+pragma Singleton
+import QtQuick
+QtObject {
+    readonly property var images: ["avif","webp","jpg","png","ico","pdf"]
+    readonly property var videos: ["webm","mkv","av1","mp4","gif","opus","mp3","wav"]
+    readonly property var audios: ["opus","mp3","wav"]
+    readonly property var documents: ["pdf","jpg-pages"]
+    readonly property var entries: [
+        {key:"avif",group:"Images",name:"AVIF",alpha:true,compact:true,use:"Compact artwork, photos and transparent assets.",pros:"Efficient lossy compression; lossless encoding; full alpha transparency.",cons:"Encoding can be slow; older viewers and workflows may need support.",source:"https://aomedia.org/specifications/avif/"},
+        {key:"webp",group:"Images",name:"WebP",alpha:true,use:"Web images and transparent artwork with broad browser support.",pros:"Lossy or lossless; full transparency; animation.",cons:"Maximum 16,383 pixels per side; some older editing tools need support.",source:"https://developers.google.com/speed/webp"},
+        {key:"jpg",group:"Images",name:"JPG",use:"Photos for widely compatible sharing.",pros:"Broad support; compact photographic images; adjustable quality.",cons:"Lossy; transparency becomes white; repeated encoding loses detail.",source:"https://jpeg.org/jpeg/"},
+        {key:"png",group:"Images",name:"PNG",alpha:true,use:"Screenshots, diagrams and artwork for further editing.",pros:"Lossless pixels; full transparency; broad support.",cons:"Photographs are usually much larger than lossy AVIF or WebP; quality does not reduce size.",source:"https://www.w3.org/TR/png-3/"},
+        {key:"ico",group:"Images",name:"ICO",alpha:true,use:"Windows application and shortcut icons.",pros:"Windows icon format; transparent pixels.",cons:"Athanor fits artwork to one 256 × 256 canvas; unsuitable for full-resolution images.",source:"https://learn.microsoft.com/en-us/windows/win32/uxguide/vis-icons"},
+        {key:"opus",group:"Audio",name:"Opus",compact:true,use:"Small speech, music and sound files in modern players.",pros:"Efficient lossy audio across low and high bitrates; suitable for speech and music.",cons:"Lossy; older players may need support; some container metadata may not transfer.",source:"https://opus-codec.org/"},
+        {key:"mp3",group:"Audio",name:"MP3",use:"Audio sharing with older players and devices.",pros:"Broad playback support; adjustable bitrate.",cons:"Lossy; typically needs more bitrate than Opus for comparable quality.",source:"https://ffmpeg.org/ffmpeg-codecs.html#libmp3lame"},
+        {key:"wav",group:"Audio",name:"WAV",use:"Decoded audio for editing and production.",pros:"Athanor writes uncompressed 24-bit PCM; broadly supported by editors.",cons:"Large files; size follows duration, channels and sample rate; converting lossy audio cannot restore detail.",source:"https://www.loc.gov/preservation/digital/formats/fdd/fdd000003.shtml"},
+        {key:"webm",group:"Video",name:"WebM",alpha:true,use:"Compressed video for modern browsers and players.",pros:"Video and Opus audio; AV1 compression, or VP9 to retain transparency.",cons:"Alpha playback depends on the player; transparent video uses 4:2:0 color; audio is recoded when needed. Use MKV for exact transparent RGB.",source:"https://www.webmproject.org/docs/container/"},
+        {key:"mkv",group:"Video",name:"MKV",alpha:true,use:"Flexible local playback, transparent video and lossless archives.",pros:"Video, audio and subtitles; AV1 or transparent VP9; Convert uses lossless FFV1.",cons:"Less suitable for direct browser playback; FFV1 outputs can be large.",source:"https://www.matroska.org/technical/basics.html"},
+        {key:"av1",group:"Video",name:".av1",compact:true,use:"Compact raw AV1 video for tools that accept elementary streams.",pros:"Efficient video compression.",cons:"Raw stream has no audio, subtitles or transparency; limited player support and timing metadata.",source:"https://aomedia.org/specifications/av1/"},
+        {key:"mp4",group:"Video",name:"MP4",use:"Video sharing with common players, phones and websites.",pros:"Athanor uses H.264 with AAC audio; widely supported in compression modes.",cons:"Transparency is flattened; Convert uses lossless RGB H.264, which has narrower playback support.",source:"https://ffmpeg.org/ffmpeg-codecs.html#libx264"},
+        {key:"gif",group:"Video",name:"GIF",alpha:true,use:"Short looping animations with broad display support.",pros:"Animation; transparent palette entry; convenient embedding.",cons:"Up to 256 colors; binary transparency; no audio; often larger than modern video.",source:"https://www.w3.org/Graphics/GIF/spec-gif89a.txt"},
+        {key:"pdf",group:"Documents",name:"PDF",alpha:true,use:"Compressed documents, or one PDF made from queued images.",pros:"Existing PDFs retain selectable text and document structure; images become pages in queue order.",cons:"Image-based pages contain raster text; compressed images lose detail; image-to-PDF compression flattens alpha on white.",source:"https://mupdf.readthedocs.io/en/latest/"},
+        {key:"jpg-pages",group:"Documents",name:"JPG pages",use:"One image per PDF page for image-based workflows.",pros:"Independent page files; adjustable quality and rendering DPI; easy image sharing.",cons:"Text, links, forms and vectors become pixels; larger DPI increases size; exported as a folder.",source:"https://mupdf.readthedocs.io/en/latest/"}
+    ]
+    function info(key) { for(let entry of entries)if(entry.key===key)return entry;return {name:key,pros:"",cons:"",use:""} }
+    function names(keys) { return keys.map(function(key){return info(key).name}) }
+    function alphaIndices(keys) { let result=[];for(let i=0;i<keys.length;i++)if(info(keys[i]).alpha)result.push(i);return result }
+    function compactIndices(keys) { let result=[];for(let i=0;i<keys.length;i++)if(info(keys[i]).compact)result.push(i);return result }
+}
