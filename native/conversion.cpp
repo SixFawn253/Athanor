@@ -24,6 +24,8 @@
 #include <avif/avif.h>
 #include <cmath>
 #include <libheif/heif.h>
+#include <libheif/heif_items.h>
+#include <libheif/heif_properties.h>
 #include <memory>
 #include <stdexcept>
 #include <webp/demux.h>
@@ -651,6 +653,113 @@ static int fitTarget(const QString &destination, const Options &options, bool im
     return chosen;
 }
 
+static void heifCheck(heif_error error)
+{
+    if (error.code != heif_error_Ok)
+        fail(QString::fromUtf8(error.message));
+}
+static void heic(const QImage &source, const QString &path, int quality, const Options &o)
+{
+    std::unique_ptr<heif_context, decltype(&heif_context_free)> context(heif_context_alloc(), heif_context_free);
+    if (!context)
+        fail("Cannot allocate HEIF encoder");
+    heif_encoder *rawEncoder = nullptr;
+    heifCheck(heif_context_get_encoder_for_format(context.get(), heif_compression_HEVC, &rawEncoder));
+    std::unique_ptr<heif_encoder, decltype(&heif_encoder_release)> encoder(rawEncoder, heif_encoder_release);
+    heifCheck(heif_encoder_set_lossy_quality(encoder.get(), quality));
+    heifCheck(heif_encoder_set_lossless(encoder.get(), o.imageLossless));
+    heifCheck(heif_encoder_set_parameter_string(encoder.get(), "chroma", o.imageLossless ? "444" : "420"));
+    heifCheck(heif_encoder_set_parameter_string(encoder.get(), "preset",
+                                                o.speed == "Fast"       ? "veryfast"
+                                                : o.speed == "Balanced" ? "medium"
+                                                                        : "slow"));
+    heifCheck(heif_encoder_set_parameter(
+        encoder.get(), "x265:pools",
+        QByteArray::number(o.threads ? o.threads : qBound(1, QThread::idealThreadCount(), 8)).constData()));
+    heif_encoder_set_logging_level(encoder.get(), 0);
+    QImage rgba = source.convertToFormat(QImage::Format_RGB888);
+    heif_image *rawImage = nullptr;
+    heifCheck(
+        heif_image_create(rgba.width(), rgba.height(), heif_colorspace_RGB, heif_chroma_interleaved_RGB, &rawImage));
+    std::unique_ptr<heif_image, decltype(&heif_image_release)> image(rawImage, heif_image_release);
+    heifCheck(heif_image_add_plane(image.get(), heif_channel_interleaved, rgba.width(), rgba.height(), 8));
+    int stride = 0;
+    auto pixels = heif_image_get_plane(image.get(), heif_channel_interleaved, &stride);
+    if (!pixels || stride < rgba.width() * 3)
+        fail("Cannot allocate HEIF image plane");
+    for (int y = 0; y < rgba.height(); y++)
+        memcpy(pixels + qsizetype(y) * stride, rgba.constScanLine(y), size_t(rgba.width()) * 3);
+    auto icc = source.colorSpace().iccProfile();
+    if (!icc.isEmpty())
+        heifCheck(heif_image_set_raw_color_profile(image.get(), "prof", icc.constData(), size_t(icc.size())));
+    std::unique_ptr<heif_color_profile_nclx, decltype(&heif_nclx_color_profile_free)> nclx(
+        heif_nclx_color_profile_alloc(), heif_nclx_color_profile_free);
+    std::unique_ptr<heif_encoding_options, decltype(&heif_encoding_options_free)> options(heif_encoding_options_alloc(),
+                                                                                          heif_encoding_options_free);
+    if (!nclx || !options)
+        fail("Cannot allocate HEIF encoding options");
+    nclx->color_primaries = heif_color_primaries_ITU_R_BT_709_5;
+    nclx->transfer_characteristics = heif_transfer_characteristic_IEC_61966_2_1;
+    nclx->matrix_coefficients =
+        o.imageLossless ? heif_matrix_coefficients_RGB_GBR : heif_matrix_coefficients_ITU_R_BT_709_5;
+    nclx->full_range_flag = 1;
+    heifCheck(heif_image_set_nclx_color_profile(image.get(), nclx.get()));
+    options->output_nclx_profile = nclx.get();
+    options->save_alpha_channel = 0;
+    options->save_two_colr_boxes_when_ICC_and_nclx_available = 1;
+    heif_image_handle *rawColorHandle = nullptr;
+    heifCheck(heif_context_encode_image(context.get(), image.get(), encoder.get(), options.get(), &rawColorHandle));
+    std::unique_ptr<heif_image_handle, decltype(&heif_image_handle_release)> colorHandle(rawColorHandle,
+                                                                                         heif_image_handle_release);
+    if (source.hasAlphaChannel())
+    {
+        QImage alpha = source.convertToFormat(QImage::Format_RGBA8888);
+        heif_image *rawAlpha = nullptr;
+        heifCheck(heif_image_create(alpha.width(), alpha.height(), heif_colorspace_monochrome, heif_chroma_monochrome,
+                                    &rawAlpha));
+        std::unique_ptr<heif_image, decltype(&heif_image_release)> alphaImage(rawAlpha, heif_image_release);
+        heifCheck(heif_image_add_plane(alphaImage.get(), heif_channel_Y, alpha.width(), alpha.height(), 8));
+        int alphaStride = 0;
+        auto plane = heif_image_get_plane(alphaImage.get(), heif_channel_Y, &alphaStride);
+        if (!plane || alphaStride < alpha.width())
+            fail("Cannot allocate HEIF alpha plane");
+        for (int y = 0; y < alpha.height(); y++)
+            for (int x = 0; x < alpha.width(); x++)
+                plane[qsizetype(y) * alphaStride + x] = alpha.constScanLine(y)[x * 4 + 3];
+        heifCheck(heif_encoder_set_lossless(encoder.get(), true));
+        nclx->matrix_coefficients = heif_matrix_coefficients_ITU_R_BT_709_5;
+        heifCheck(heif_image_set_nclx_color_profile(alphaImage.get(), nclx.get()));
+        heif_image_handle *rawAlphaHandle = nullptr;
+        heifCheck(
+            heif_context_encode_image(context.get(), alphaImage.get(), encoder.get(), options.get(), &rawAlphaHandle));
+        std::unique_ptr<heif_image_handle, decltype(&heif_image_handle_release)> alphaHandle(rawAlphaHandle,
+                                                                                             heif_image_handle_release);
+        auto alphaId = heif_image_handle_get_item_id(alphaHandle.get());
+        QByteArray aux(4, 0);
+        aux.append("urn:mpeg:hevc:2015:auxid:1");
+        aux.append(char(0));
+        heifCheck(heif_item_add_raw_property(context.get(), alphaId, heif_fourcc('a', 'u', 'x', 'C'), nullptr,
+                                             reinterpret_cast<const uint8_t *>(aux.constData()), size_t(aux.size()), 1,
+                                             nullptr));
+        heifCheck(heif_context_add_item_reference(context.get(), heif_fourcc('a', 'u', 'x', 'l'), alphaId,
+                                                  heif_image_handle_get_item_id(colorHandle.get())));
+    }
+    QFile output(path);
+    if (!output.open(QIODevice::WriteOnly))
+        fail(output.errorString());
+    heif_writer writer{};
+    writer.writer_api_version = 1;
+    writer.write = [](heif_context *, const void *data, size_t size, void *user) -> heif_error {
+        auto file = static_cast<QFile *>(user);
+        if (size > size_t(LLONG_MAX) || file->write(static_cast<const char *>(data), qint64(size)) != qint64(size))
+            return {heif_error_Encoding_error, heif_suberror_Unspecified, "Cannot write HEIF output"};
+        return {heif_error_Ok, heif_suberror_Unspecified, "Success"};
+    };
+    heifCheck(heif_context_write(context.get(), &writer, &output));
+    if (!output.flush())
+        fail(output.errorString());
+}
+
 static void image(const QString &source, const QString &destination, const Options &o, Progress progress,
                   int previewSize = 0)
 {
@@ -727,6 +836,15 @@ static void image(const QString &source, const QString &destination, const Optio
             auto result = process(tool("avifenc"), trialArgs);
             if (result.code)
                 fail(QString::fromUtf8(result.error + result.output));
+        });
+    }
+    else if (o.image == "heic" || o.image == "heif")
+    {
+        if (frames.images.size() != 1)
+            fail("HEIF output stores one still image. Choose AVIF or WebP to retain animation.");
+        fitTarget(destination, o, true, progress, [&](int quality, Progress report) {
+            report(18, "Encoding " + o.image.toUpper());
+            heic(frames.images[0], destination, quality, o);
         });
     }
     else if (o.image == "webp")
@@ -1536,7 +1654,8 @@ QJsonObject Conversion::run(const QJsonObject &spec, Progress progress)
                         : category == "image" ? o.image
                         : category == "audio" ? o.audio
                                               : o.video;
-    if ((category == "image" && !QStringList{"avif", "webp", "jpg", "png", "ico", "pdf"}.contains(extension)) ||
+    if ((category == "image" &&
+         !QStringList{"avif", "webp", "heic", "heif", "jpg", "png", "ico", "pdf"}.contains(extension)) ||
         (category == "video" &&
          !QStringList{"webm", "mkv", "av1", "mp4", "gif", "opus", "mp3", "wav"}.contains(extension)) ||
         (category == "audio" && !QStringList{"opus", "mp3", "wav"}.contains(extension)) ||

@@ -59,6 +59,7 @@ ApplicationWindow {
         Image { Layout.preferredWidth: 25; Layout.preferredHeight: 25; sourceSize: Qt.size(50,50); source: "image://icons/brand-mark/"+window.fg.toString().substring(1) }
         Text { text: "ATHANOR"; color: window.fg; font.pixelSize: 20; font.bold: true }
         Item { Layout.fillWidth: true }
+        ActionButton { text: "Update available"; visible: updater.availableVersion.length>0; quiet: true; onClicked: window.showPage(1) }
         ActionButton { objectName: "settingsButton"; Layout.preferredWidth: 42; quiet: true; selected: window.page===1; icon: "settings"; accessibleText: "Settings"; tooltip: "Settings · Ctrl+,"; onClicked: window.showPage(window.page===1 ? 0 : 1) }
         ActionButton { objectName: "helpButton"; Layout.preferredWidth: 42; quiet: true; icon: "help"; accessibleText: "Help"; tooltip: "Help"; onClicked: help.open() }
     }
@@ -240,6 +241,20 @@ ApplicationWindow {
                             Item { Layout.fillWidth: true }
                             Field { Layout.preferredWidth: 280; accessibleLabel: "Animation preference"; model: ["Follow system","Full animations","Reduced motion"]; currentIndex: ["System","Full","Reduced"].indexOf(backend.motion); onActivated: backend.motion=["System","Full","Reduced"][index] }
                         }
+                        Text { text: "Updates"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                        Card {
+                            Layout.fillWidth: true
+                            implicitHeight: updatesContent.implicitHeight+32
+                            ColumnLayout { id: updatesContent; anchors.fill: parent; anchors.margins: 16; spacing: 12
+                                Check { text: "Automatically check GitHub for updates"; checked: updater.automatic; onToggled: updater.automatic=checked }
+                                RowLayout { Layout.fillWidth: true
+                                    Text { Layout.fillWidth: true; text: updater.status; color: Theme.muted; wrapMode: Text.Wrap; font.pixelSize: 13 }
+                                    ActionButton { text: "Check now"; enabled: !updater.working; onClicked: updater.check() }
+                                    ActionButton { text: "Update and restart"; primary: true; visible: updater.canInstall; enabled: !backend.busy&&!backend.previewBusy; onClicked: updateConfirm.open() }
+                                }
+                                ProgressBar { Layout.fillWidth: true; visible: updater.working; from: 0; to: 100; value: updater.progress; indeterminate: updater.progress===0; palette.highlight: Theme.accent }
+                            }
+                        }
                         Text { text: "Performance"; color: window.fg; font.pixelSize: 17; font.bold: true }
                         Card {
                             Layout.fillWidth: true
@@ -277,6 +292,16 @@ ApplicationWindow {
             fragmentShader: "qrc:/shaders/reveal.frag.qsb"
         }
         NumberAnimation { id: reveal; target: transitionCover; property: "progress"; from: 0; to: 1.01; duration: Theme.pageDuration; easing.type: Easing.InOutCubic; onFinished: transitionCover.visible=false }
+    }
+    Dialog {
+        id: updateConfirm; parent: Overlay.overlay; anchors.centerIn: parent; modal: true; title: "Install update?"; width: Math.min(window.width-48,460)
+        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.border }
+        contentItem: Text { text: "Athanor will download the update and restart. The current queue will be cleared. Your saved settings and original files will be kept."; color: Theme.text; font.pixelSize: 13; wrapMode: Text.Wrap }
+        footer: RowLayout { spacing: 8
+            Item { Layout.fillWidth: true }
+            ActionButton { text: "Cancel"; onClicked: updateConfirm.close() }
+            ActionButton { text: "Update and restart"; primary: true; onClicked: {updateConfirm.close();updater.install()} }
+        }
     }
     ConversionPrompts { id: prompts; objectName: "conversionPrompts" }
     FormatGuide { id: formatGuide; parent: Overlay.overlay }

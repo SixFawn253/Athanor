@@ -5,7 +5,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
-#include <bcrypt.h>
+#include <wincrypt.h>
 #include <dwmapi.h>
 #include <filesystem>
 #include <string>
@@ -236,6 +236,128 @@ static bool valid(const fs::path &cache)
     }
     return true;
 }
+static std::wstring fileDigest(const fs::path &path)
+{
+    HCRYPTPROV provider = 0;
+    HCRYPTHASH hash = 0;
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        fail("Cannot read the downloaded update.");
+    if (!CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT) ||
+        !CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash))
+    {
+        CloseHandle(file);
+        if (provider)
+            CryptReleaseContext(provider, 0);
+        fail("Cannot verify the downloaded update.");
+    }
+    BYTE buffer[65536], digest[32];
+    DWORD read = 0, size = sizeof(digest);
+    bool ok = true;
+    while (ok)
+    {
+        if (!ReadFile(file, buffer, sizeof(buffer), &read, nullptr))
+        {
+            ok = false;
+            break;
+        }
+        if (!read)
+            break;
+        ok = CryptHashData(hash, buffer, read, 0);
+    }
+    ok = ok && CryptGetHashParam(hash, HP_HASHVAL, digest, &size, 0);
+    CryptDestroyHash(hash);
+    CryptReleaseContext(provider, 0);
+    CloseHandle(file);
+    if (!ok)
+        fail("Cannot verify the downloaded update.");
+    std::wstring text;
+    for (auto value : digest)
+    {
+        text += L"0123456789abcdef"[value >> 4];
+        text += L"0123456789abcdef"[value & 15];
+    }
+    return text;
+}
+static void waitForExit(const std::wstring &value)
+{
+    size_t end = 0;
+    auto pid = std::stoul(value, &end);
+    if (end != value.size() || !pid || pid > MAXDWORD || pid == GetCurrentProcessId())
+        fail("Invalid update process.");
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, DWORD(pid));
+    if (!process)
+    {
+        if (GetLastError() == ERROR_INVALID_PARAMETER)
+            return;
+        fail("Cannot wait for Athanor to close.");
+    }
+    DWORD result = WaitForSingleObject(process, 120000);
+    CloseHandle(process);
+    if (result != WAIT_OBJECT_0)
+        fail("Close all Athanor windows and try the update again.");
+}
+static int applyUpdate(const fs::path &self, const std::vector<std::wstring> &args)
+{
+    if (args.size() != 5 || args[4].size() != 64 || fileDigest(self) != args[4])
+        fail("The downloaded update could not be verified.");
+    fs::path target = fs::absolute(args[1]).lexically_normal();
+    rejectLinks(target);
+    if (target.extension() != L".exe" || !fs::is_regular_file(target) || fs::equivalent(target, self))
+        fail("Cannot locate the portable app to update.");
+    if (wait(start(self, {L"--cli"}, true, false), false))
+        fail("The downloaded app could not start. Your portable app is unchanged.");
+    waitForExit(args[2]);
+    waitForExit(args[3]);
+    GUID id{};
+    CoCreateGuid(&id);
+    wchar_t guid[40]{};
+    StringFromGUID2(id, guid, 40);
+    fs::path replacement = target.parent_path() / (L".athanor-update-" + std::wstring(guid) + L".exe");
+    fs::path backup = replacement;
+    backup += L".bak";
+    if (!CopyFileW(self.c_str(), replacement.c_str(), TRUE))
+        fail("The portable app folder is not writable.");
+    if (!CopyFileW(target.c_str(), backup.c_str(), TRUE))
+    {
+        fs::remove(replacement);
+        fail("Cannot save a backup of the portable app. Your app is unchanged.");
+    }
+    bool replaced = false;
+    for (int attempt = 0; attempt < 50; ++attempt)
+    {
+        if (MoveFileExW(replacement.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            replaced = true;
+            break;
+        }
+        Sleep(100);
+    }
+    if (!replaced)
+    {
+        fs::remove(replacement);
+        fs::remove(backup);
+        fail("Windows is still using the portable app. Close its other windows and try again.");
+    }
+    try
+    {
+        HANDLE app =
+            start(target,
+                  env(L"ATHANOR_TEST").empty() ? std::vector<std::wstring>{} : std::vector<std::wstring>{L"--cli"},
+                  false, false);
+        CloseHandle(app);
+        std::error_code cleanupError;
+        fs::remove(backup, cleanupError);
+    }
+    catch (...)
+    {
+        MoveFileExW(backup.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        throw;
+    }
+    return 0;
+}
+
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
 {
     fs::path staging, runtimeRoot;
@@ -259,6 +381,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
         if (!length || length == self.size())
             fail("Cannot locate the downloaded executable.");
         self.resize(length);
+        if (!args.empty() && args[0] == L"--apply-update")
+            return applyUpdate(self, args);
         fs::path root = env(L"ATHANOR_PORTABLE_CACHE");
         if (root.empty())
         {
@@ -300,8 +424,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
                 showSplash(instance);
             if (fs::exists(cache))
             {
-                HANDLE repair = CreateFileW((cache / L".in-use").c_str(), GENERIC_READ, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-                if (repair == INVALID_HANDLE_VALUE) fail("Close Athanor before repairing its cached runtime.");
+                HANDLE repair = CreateFileW((cache / L".in-use").c_str(), GENERIC_READ, 0, nullptr, OPEN_ALWAYS,
+                                            FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (repair == INVALID_HANDLE_VALUE)
+                    fail("Close Athanor before repairing its cached runtime.");
                 CloseHandle(repair);
                 removeOwned(cache, runtimeRoot);
             }
@@ -353,6 +479,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
         fs::create_directories(settings);
         SetEnvironmentVariableW(L"ATHANOR_SETTINGS_DIR", settings.c_str());
         SetEnvironmentVariableW(L"ATHANOR_LAUNCHER_PATH", self.c_str());
+        SetEnvironmentVariableW(L"ATHANOR_LAUNCHER_PID", std::to_wstring(GetCurrentProcessId()).c_str());
         HANDLE app = start(cache / L"Athanor" / L"Athanor.exe", args, false, true);
         if (splash)
         {

@@ -97,9 +97,9 @@ bool Platform::contextMenu(bool enabled, const QString &executable, QString *err
     };
     bool ok = true;
     for (auto e : images)
-        ok = install(e, {"avif", "webp", "jpg", "png", "ico", "images-pdf"},
-                     {"Convert to AVIF", "Convert to WebP", "Convert to JPG", "Convert to PNG", "Convert to ICO",
-                      "Create PDF"}) &&
+        ok = install(e, {"avif", "webp", "heic", "heif", "jpg", "png", "ico", "images-pdf"},
+                     {"Convert to AVIF", "Convert to WebP", "Convert to HEIC", "Convert to HEIF", "Convert to JPG",
+                      "Convert to PNG", "Convert to ICO", "Create PDF"}) &&
              ok;
     for (auto e : videos)
         ok = install(e, {"webm", "mkv", "av1", "mp4", "gif", "opus", "mp3", "wav"},

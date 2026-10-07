@@ -1,13 +1,15 @@
 pragma Singleton
 import QtQuick
 QtObject {
-    readonly property var images: ["avif","webp","jpg","png","ico","pdf"]
+    readonly property var images: ["avif","webp","heic","heif","jpg","png","ico","pdf"]
     readonly property var videos: ["webm","mkv","av1","mp4","gif","opus","mp3","wav"]
     readonly property var audios: ["opus","mp3","wav"]
     readonly property var documents: ["pdf","jpg-pages"]
     readonly property var entries: [
         {key:"avif",group:"Images",name:"AVIF",alpha:true,compact:true,use:"Compact artwork, photos and transparent assets.",pros:"Efficient lossy compression; lossless encoding; full alpha transparency.",cons:"Encoding can be slow; older viewers and workflows may need support.",source:"https://aomedia.org/specifications/avif/"},
         {key:"webp",group:"Images",name:"WebP",alpha:true,use:"Web images and transparent artwork with broad browser support.",pros:"Lossy or lossless; full transparency; animation.",cons:"Maximum 16,383 pixels per side; some older editing tools need support.",source:"https://developers.google.com/speed/webp"},
+        {key:"heic",group:"Images",name:"HEIC",alpha:true,use:"HEVC-compressed still images for compatible photo workflows.",pros:"Efficient photo compression; full alpha transparency; lossless RGB in Convert mode.",cons:"Viewer support varies and may require HEVC support; Athanor writes one still image; HDR input is decoded to 8-bit.",source:"https://github.com/strukturag/libheif"},
+        {key:"heif",group:"Images",name:"HEIF",alpha:true,use:"HEVC-compressed still images for compatible photo workflows.",pros:"Efficient photo compression; full alpha transparency; lossless RGB in Convert mode.",cons:"Viewer support varies and may require HEVC support; Athanor writes one still image; HDR input is decoded to 8-bit.",source:"https://github.com/strukturag/libheif"},
         {key:"jpg",group:"Images",name:"JPG",use:"Photos for widely compatible sharing.",pros:"Broad support; compact photographic images; adjustable quality.",cons:"Lossy; transparency becomes white; repeated encoding loses detail.",source:"https://jpeg.org/jpeg/"},
         {key:"png",group:"Images",name:"PNG",alpha:true,use:"Screenshots, diagrams and artwork for further editing.",pros:"Lossless pixels; full transparency; broad support.",cons:"Photographs are usually much larger than lossy AVIF or WebP; quality does not reduce size.",source:"https://www.w3.org/TR/png-3/"},
         {key:"ico",group:"Images",name:"ICO",alpha:true,use:"Windows application and shortcut icons.",pros:"Windows icon format; transparent pixels.",cons:"Athanor fits artwork to one 256 × 256 canvas; unsuitable for full-resolution images.",source:"https://learn.microsoft.com/en-us/windows/win32/uxguide/vis-icons"},

@@ -285,7 +285,7 @@ void Controller::setOption(const QString &key, const QVariant &value)
 }
 void Controller::setTarget(const QString &target)
 {
-    if (QStringList{"avif", "webp", "jpg", "png", "ico"}.contains(target))
+    if (QStringList{"avif", "webp", "heic", "heif", "jpg", "png", "ico"}.contains(target))
         opts.image = target;
     else if (QStringList{"webm", "mkv", "av1", "mp4", "gif"}.contains(target))
         opts.video = target;

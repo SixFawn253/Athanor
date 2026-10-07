@@ -1,5 +1,6 @@
 #include <cmath>
 #include "controller.h"
+#include "updater.h"
 #include "conversion.h"
 #include "platform.h"
 #include "ui_test.h"
@@ -103,7 +104,7 @@ int main(int argc, char **argv)
 {
     QApplication application(argc, argv);
     application.setApplicationName("Athanor");
-    application.setApplicationVersion("1.0-alpha");
+    application.setApplicationVersion("1.1-alpha");
     application.setQuitOnLastWindowClosed(true);
     QImageReader::setAllocationLimit(0);
     QQuickStyle::setStyle("Basic");
@@ -150,6 +151,9 @@ int main(int argc, char **argv)
     QCommandLineOption formatQueueTest("format-queue-test", QString(), "fixtures");
     formatQueueTest.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(formatQueueTest);
+    QCommandLineOption updateTest("update-test", QString(), "folder");
+    updateTest.setFlags(QCommandLineOption::HiddenFromHelp);
+    parser.addOption(updateTest);
     parser.process(application);
     if (parser.isSet("cli"))
     {
@@ -184,7 +188,7 @@ int main(int argc, char **argv)
             opts.targetBytes = qint64(std::round(mb * 1000000));
         }
         QString target = parser.value("target");
-        if (QStringList{"avif", "webp", "jpg", "png", "ico"}.contains(target))
+        if (QStringList{"avif", "webp", "heic", "heif", "jpg", "png", "ico"}.contains(target))
             opts.image = target;
         if (QStringList{"webm", "mkv", "av1", "mp4", "gif", "opus", "mp3", "wav"}.contains(target))
             opts.video = target;
@@ -223,12 +227,36 @@ int main(int argc, char **argv)
         return errors ? 1 : 0;
     }
     if (parser.isSet("self-test") || parser.isSet("controller-test") || parser.isSet("queue-test") ||
-        parser.isSet("format-queue-test"))
+        parser.isSet("format-queue-test") || parser.isSet("update-test"))
         qputenv("ATHANOR_TEST", "1");
     bool quick = parser.isSet("quick") || parser.value("target") != "auto";
     Controller controller(quick);
     controller.setTarget(parser.value("target"));
     controller.addPaths(parser.positionalArguments(), parser.isSet("include-subfolders"));
+    if (parser.isSet("update-test"))
+    {
+        qputenv("ATHANOR_TEST", "1");
+        Updater updater(&controller);
+        bool downloading = false;
+        QObject::connect(&updater, &Updater::changed, &application, [&] {
+            if (updater.working())
+                return;
+            if (!downloading && qEnvironmentVariableIsSet("ATHANOR_TEST_UPDATE_INSTALL") && updater.canInstall())
+            {
+                downloading = true;
+                updater.install();
+                return;
+            }
+            Conversion::writeLine({{"status", updater.status()},
+                                   {"version", updater.availableVersion()},
+                                   {"can_install", updater.canInstall()},
+                                   {"downloaded", downloading}});
+            application.quit();
+        });
+        QTimer::singleShot(0, &updater, &Updater::check);
+        QTimer::singleShot(65000, &application, [] { QCoreApplication::exit(3); });
+        return application.exec();
+    }
     if (parser.isSet("format-queue-test"))
     {
         runFormatQueueTest(&controller, parser.value("format-queue-test"));
@@ -244,10 +272,12 @@ int main(int argc, char **argv)
         runControllerTest(&controller, parser.value("controller-test"));
         return application.exec();
     }
+    Updater updater(&controller);
     QQmlApplicationEngine engine;
     engine.addImageProvider("media", new MediaProvider);
     engine.addImageProvider("icons", new IconProvider);
     engine.rootContext()->setContextProperty("backend", &controller);
+    engine.rootContext()->setContextProperty("updater", &updater);
     engine.rootContext()->setContextProperty("nativePlatform", QString(
 #ifdef Q_OS_WIN
                                                                    "Windows"
