@@ -507,7 +507,7 @@ QString Controller::conversionWarning() const
 }
 void Controller::start()
 {
-    if (!canConvert())
+    if (property("updating").toBool() || !canConvert())
         return;
     closePreview();
     running = true;

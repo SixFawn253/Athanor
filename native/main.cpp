@@ -142,7 +142,7 @@ int main(int argc, char **argv)
 #endif
     Application application(argc, argv);
     application.setApplicationName("Athanor");
-    application.setApplicationVersion("1.2.1-alpha");
+    application.setApplicationVersion("1.3.0");
     application.setQuitOnLastWindowClosed(true);
     QImageReader::setAllocationLimit(0);
     QQuickStyle::setStyle("Basic");
@@ -349,6 +349,8 @@ int main(int argc, char **argv)
     engine.loadFromModule("Athanor", quick ? "Quick" : "Main");
     if (parser.isSet("qml-check"))
         return engine.rootObjects().isEmpty() ? 2 : 0;
+    if (parser.isSet("self-test") && qEnvironmentVariableIsSet("ATHANOR_TEST_UPDATE_API"))
+        QTimer::singleShot(0, &updater, &Updater::check);
     if (parser.isSet("self-test"))
         runUiTest(&engine, &controller, parser.value("self-test"), quick);
     return application.exec();

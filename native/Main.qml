@@ -44,7 +44,7 @@ ApplicationWindow {
     Shortcut { sequence: "Escape"; enabled: window.page===1&&!help.visible&&!preview.visible&&!formatGuide.visible&&!prompts.active; onActivated: window.showPage(0,Qt.ShortcutFocusReason) }
     Shortcut { sequence: "Alt+Left"; enabled: window.page===1&&!help.visible&&!preview.visible&&!formatGuide.visible&&!prompts.active; onActivated: window.showPage(0,Qt.ShortcutFocusReason) }
     Shortcut { sequence: "Ctrl+O"; enabled: !help.visible&&!preview.visible&&!formatGuide.visible&&!prompts.active; onActivated: backend.addFiles() }
-    Shortcut { sequence: "Ctrl+Return"; enabled: backend.canConvert&&sizeChoice.valid&&!backend.outputError.length&&!help.visible&&!preview.visible&&!formatGuide.visible&&!prompts.active; onActivated: prompts.start() }
+    Shortcut { sequence: "Ctrl+Return"; enabled: !updater.downloading&&backend.canConvert&&sizeChoice.valid&&!backend.outputError.length&&!help.visible&&!preview.visible&&!formatGuide.visible&&!prompts.active; onActivated: prompts.start() }
     DropArea { anchors.fill: parent; onDropped: function(drop) { if(drop.hasUrls) { backend.addUrls(drop.urls,window.includeSubfolders); drop.acceptProposedAction() } } }
     RowLayout {
         id: topBar
@@ -59,7 +59,10 @@ ApplicationWindow {
         Image { Layout.preferredWidth: 25; Layout.preferredHeight: 25; sourceSize: Qt.size(50,50); source: "image://icons/brand-mark/"+window.fg.toString().substring(1) }
         Text { text: "ATHANOR"; color: window.fg; font.pixelSize: 20; font.bold: true }
         Item { Layout.fillWidth: true }
-        ActionButton { text: "Update available"; visible: updater.availableVersion.length>0; quiet: true; onClicked: window.showPage(1) }
+        RowLayout { visible: updater.availableVersion.length>0; spacing: 10
+            Text { text: updater.availableVersion; color: Theme.muted; font.pixelSize: 12 }
+            ActionButton { objectName: "downloadUpdateButton"; text: updater.downloading?"Downloading "+updater.progress+"%":"Download"; primary: true; enabled: updater.canInstall&&!backend.busy&&!backend.previewBusy; tooltip: "Download, verify and install the update, then restart Athanor. The current queue will be cleared."; onClicked: updater.install() }
+        }
         ActionButton { objectName: "settingsButton"; Layout.preferredWidth: 42; quiet: true; selected: window.page===1; icon: "settings"; accessibleText: "Settings"; tooltip: "Settings · Ctrl+,"; onClicked: window.showPage(window.page===1 ? 0 : 1) }
         ActionButton { objectName: "helpButton"; Layout.preferredWidth: 42; quiet: true; icon: "help"; accessibleText: "Help"; tooltip: "Help"; onClicked: help.open() }
     }
@@ -128,7 +131,7 @@ ApplicationWindow {
                                 Item { opacity: backend.options.size_mode?0:1; enabled: opacity>0; Layout.fillWidth: true; Layout.preferredHeight: 42
                                     RowLayout { anchors.fill: parent; visible: !backend.options.size_mode&&!backend.options.convert_only
                                         Spin { objectName: "qualitySpin"; implicitWidth: 90; Accessible.name: "Image quality"; from: 1; to: 100; value: backend.options.quality; enabled: !backend.busy&&backend.options.image!=="png"&&backend.options.image!=="ico"; onValueModified: backend.setOption("quality",value) }
-                                        ActionButton { text: "Preview"; icon: "eye"; enabled: backend.hasImage&&!backend.busy&&backend.options.image!=="pdf"; tooltip: "Compare image quality"; onClicked: backend.preview("image",backend.options.quality,window.selectedRow) }
+                                        ActionButton { text: "Preview"; icon: "eye"; enabled: !updater.downloading&&backend.hasImage&&!backend.busy&&backend.options.image!=="pdf"; tooltip: "Compare image quality"; onClicked: backend.preview("image",backend.options.quality,window.selectedRow) }
                                         Item { Layout.fillWidth: true }
                                     }
                                     Text { anchors.fill: parent; visible: backend.options.size_mode||backend.options.convert_only; text: backend.options.size_mode?"Use the maximum size below.":backend.options.image==="jpg"?"Highest quality JPG; alpha becomes white.":backend.options.image==="ico"?"Fit to a 256 × 256 icon canvas.":"Preserve image detail and transparency."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter }
@@ -140,7 +143,7 @@ ApplicationWindow {
                                 Item { opacity: backend.options.size_mode?0:1; enabled: opacity>0; Layout.fillWidth: true; Layout.preferredHeight: 42
                                     RowLayout { anchors.fill: parent; visible: !backend.options.size_mode&&!backend.options.convert_only&&Formats.audios.indexOf(backend.options.video)<0
                                         Spin { implicitWidth: 90; Accessible.name: "Video CRF"; from: 0; to: 63; value: backend.options.crf; enabled: !backend.busy; onValueModified: backend.setOption("crf",value) }
-                                        ActionButton { text: "Preview"; icon: "eye"; enabled: backend.hasVideo&&!backend.busy; tooltip: "Compare video quality"; onClicked: backend.preview("video",backend.options.crf,window.selectedRow) }
+                                        ActionButton { text: "Preview"; icon: "eye"; enabled: !updater.downloading&&backend.hasVideo&&!backend.busy; tooltip: "Compare video quality"; onClicked: backend.preview("video",backend.options.crf,window.selectedRow) }
                                         Item { Layout.fillWidth: true }
                                     }
                                     Text { anchors.fill: parent; visible: backend.options.size_mode||backend.options.convert_only||Formats.audios.indexOf(backend.options.video)>=0; text: backend.options.size_mode?"Use the maximum size below.":Formats.audios.indexOf(backend.options.video)>=0?"Extract first audio track; use audio bitrate.":backend.options.video==="gif"?"Palette animation; binary transparency.":backend.options.video==="mkv"?"Lossless video; retain audio tracks.":backend.options.video==="mp4"?"Lossless RGB video; AAC audio.":"Preserve video detail."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter }
@@ -188,7 +191,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Check { objectName: "deleteOriginals"; text: "Delete originals after successful conversion"; font.pixelSize: 12; enabled: !backend.busy; checked: backend.options.delete; onClicked: prompts.toggleDelete(this) }
                     Item { Layout.fillWidth: true }
-                    ActionButton { objectName: "convertButton"; text: "Convert"; icon: "convert"; primary: true; enabled: backend.canConvert&&sizeChoice.valid&&!backend.outputError.length; tooltip: backend.busy?"A conversion is already running":backend.count===0?"Add files to convert":backend.outputError.length?backend.outputError:!sizeChoice.valid?"Enter a positive target size":!backend.canConvert?"All files are processed. Change a format or compression setting to convert again.":"Convert queued files · Ctrl+Enter"; onClicked: prompts.start() }
+                    ActionButton { objectName: "convertButton"; text: "Convert"; icon: "convert"; primary: true; enabled: !updater.downloading&&backend.canConvert&&sizeChoice.valid&&!backend.outputError.length; tooltip: backend.busy?"A conversion is already running":backend.count===0?"Add files to convert":backend.outputError.length?backend.outputError:!sizeChoice.valid?"Enter a positive target size":!backend.canConvert?"All files are processed. Change a format or compression setting to convert again.":"Convert queued files · Ctrl+Enter"; onClicked: prompts.start() }
                     ActionButton { text: "Cancel"; icon: "close"; enabled: backend.busy; onClicked: backend.cancel() }
                 }
                 Text { visible: backend.outputError.length>0||backend.statusMessage.length>0; text: backend.outputError||backend.statusMessage; color: window.muted; font.pixelSize: 12 }
@@ -246,11 +249,12 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             implicitHeight: updatesContent.implicitHeight+32
                             ColumnLayout { id: updatesContent; anchors.fill: parent; anchors.margins: 16; spacing: 12
+                                Text { Layout.fillWidth: true; text: "Download installs the update automatically and restarts Athanor. Your current queue will be cleared; saved settings and originals are kept."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap }
                                 Check { text: "Automatically check GitHub for updates"; checked: updater.automatic; onToggled: updater.automatic=checked }
                                 RowLayout { Layout.fillWidth: true
                                     Text { Layout.fillWidth: true; text: updater.status; color: Theme.muted; wrapMode: Text.Wrap; font.pixelSize: 13 }
                                     ActionButton { text: "Check now"; enabled: !updater.working; onClicked: updater.check() }
-                                    ActionButton { text: "Update and restart"; primary: true; visible: updater.canInstall; enabled: !backend.busy&&!backend.previewBusy; onClicked: updateConfirm.open() }
+                                    ActionButton { objectName: "settingsDownloadButton"; text: updater.downloading?"Downloading "+updater.progress+"%":"Download"; primary: true; visible: updater.availableVersion.length>0; enabled: updater.canInstall&&!backend.busy&&!backend.previewBusy; tooltip: "Download and automatically apply the update, then restart."; onClicked: updater.install() }
                                 }
                                 ProgressBar { Layout.fillWidth: true; visible: updater.working; from: 0; to: 100; value: updater.progress; indeterminate: updater.progress===0; palette.highlight: Theme.accent }
                             }
@@ -293,16 +297,6 @@ ApplicationWindow {
             fragmentShader: "qrc:/shaders/reveal.frag.qsb"
         }
         NumberAnimation { id: reveal; target: transitionCover; property: "progress"; from: 0; to: 1.01; duration: Theme.pageDuration; easing.type: Easing.InOutCubic; onFinished: transitionCover.visible=false }
-    }
-    Dialog {
-        id: updateConfirm; parent: Overlay.overlay; anchors.centerIn: parent; modal: true; title: "Install update?"; width: Math.min(window.width-48,460)
-        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.border }
-        contentItem: Text { text: "Athanor will download the update and restart. The current queue will be cleared. Your saved settings and original files will be kept."; color: Theme.text; font.pixelSize: 13; wrapMode: Text.Wrap }
-        footer: RowLayout { spacing: 8
-            Item { Layout.fillWidth: true }
-            ActionButton { text: "Cancel"; onClicked: updateConfirm.close() }
-            ActionButton { text: "Update and restart"; primary: true; onClicked: {updateConfirm.close();updater.install()} }
-        }
     }
     ConversionPrompts { id: prompts; objectName: "conversionPrompts" }
     FormatGuide { id: formatGuide; parent: Overlay.overlay }

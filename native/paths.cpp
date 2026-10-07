@@ -82,7 +82,7 @@ QString Platform::installRoot()
         return {};
     return dir.absolutePath();
 #else
-    return qEnvironmentVariable("ATHANOR_LAUNCHER_PATH");
+    return qEnvironmentVariable("ATHANOR_LAUNCHER_PATH", QCoreApplication::applicationFilePath());
 #endif
 }
 QString Platform::releaseAsset(const QString &version)

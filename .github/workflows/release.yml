@@ -72,9 +72,9 @@ jobs:
               print(path.name, hashlib.sha256(path.read_bytes()).hexdigest())
           def gh(*args):
               return subprocess.check_output(['gh', *args], text=True)
+          linux = package(f'Athanor-Alpha-{version}-Linux-x64.tar.gz')
           for tag, title, notes, paths, latest in [
-              (f'v{version}', f'Alpha {version} — macOS', 'Adds overall queue progress and savings, hardware-adaptive parallel conversions and shortest-job-first scheduling. Fixes format selector clicks.\n\nDownload arm64 for Apple Silicon or x64 for Intel. Extract the ZIP and open Athanor.app. The app is ad hoc signed and is not Apple-notarized.', mac, 'false'),
-              (f'alpha-{version}', f'Alpha {version} — Windows', 'Adds overall queue progress and savings, hardware-adaptive parallel conversions and shortest-job-first scheduling. Fixes format selector clicks.\n\nDownload and run the Windows x64 EXE.', [windows], 'true')]:
+              (f'v{version}', f'v{version}', '', [windows, *mac, linux], 'true')]:
               releases = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
               existing = [r for r in releases if r['tag_name'] == tag]
               if not existing:
@@ -84,8 +84,10 @@ jobs:
               assert len(existing) == 1
               release = existing[0]
               assert release['target_commitish'] == sha, 'Release must refer to the verified build'
-              if release['draft']:
-                  gh('release', 'upload', tag, '--repo', repo, '--clobber', *map(str, paths))
+              existing_assets = {a['name']: a for a in release['assets']}
+              uploads = paths if release['draft'] else [p for p in paths if p.name not in existing_assets]
+              if uploads:
+                  gh('release', 'upload', tag, '--repo', repo, '--clobber', *map(str, uploads))
               # GitHub's tag endpoint excludes drafts; use the stable release ID.
               release = json.loads(gh('api', f"repos/{repo}/releases/{release['id']}"))
               assets = {a['name']: a for a in release['assets']}
@@ -93,7 +95,11 @@ jobs:
               for path in paths:
                   asset = assets[path.name]
                   assert asset['state'] == 'uploaded'
-                  assert asset['size'] == path.stat().st_size
-                  assert asset['digest'] == 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+                  if release['draft'] or path in uploads:
+                      assert asset['size'] == path.stat().st_size
+                      assert asset['digest'] == 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+                  else:
+                      assert asset['size'] > 1000000
+                      assert re.fullmatch(r'sha256:[0-9a-f]{64}', asset['digest'])
               gh('release', 'edit', tag, '--repo', repo, '--draft=false', f'--latest={latest}')
           PY

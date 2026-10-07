@@ -9,6 +9,7 @@ class Updater : public QObject
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString availableVersion READ availableVersion NOTIFY changed)
     Q_PROPERTY(bool working READ working NOTIFY changed)
+    Q_PROPERTY(bool downloading READ downloading NOTIFY changed)
     Q_PROPERTY(bool automatic READ automatic WRITE setAutomatic NOTIFY changed)
     Q_PROPERTY(bool canInstall READ canInstall NOTIFY changed)
     Q_PROPERTY(int progress READ progress NOTIFY changed)
@@ -25,6 +26,10 @@ class Updater : public QObject
     bool working() const
     {
         return pending;
+    }
+    bool downloading() const
+    {
+        return downloadActive;
     }
     bool automatic() const
     {
@@ -47,6 +52,6 @@ class Updater : public QObject
     QTimer timer;
     QString message, version, preferences;
     QJsonObject asset;
-    bool pending = false, autoCheck = true;
+    bool pending = false, autoCheck = true, downloadActive = false;
     int percent = 0;
 };

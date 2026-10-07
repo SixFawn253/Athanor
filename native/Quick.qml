@@ -79,7 +79,7 @@ ApplicationWindow {
                 Check { text: "Delete original after successful conversion"; font.pixelSize: 12; checked: backend.options.delete; enabled: !backend.busy; onClicked: prompts.toggleDelete(this) }
             }
         }
-        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: backend.statusMessage; font.pixelSize: 12; color: window.muted; wrapMode: Text.Wrap } ActionButton { text: "Convert"; icon: "convert"; primary: true; enabled: backend.canConvert&&sizeChoice.valid&&!backend.outputError.length; onClicked: prompts.start() } ActionButton { text: backend.busy?"Cancel":"Close"; icon: "close"; onClicked: backend.busy?backend.cancel():window.close() } }
+        RowLayout { Layout.fillWidth: true; Text { Layout.fillWidth: true; text: backend.statusMessage; font.pixelSize: 12; color: window.muted; wrapMode: Text.Wrap } ActionButton { text: "Convert"; icon: "convert"; primary: true; enabled: !updater.downloading&&backend.canConvert&&sizeChoice.valid&&!backend.outputError.length; onClicked: prompts.start() } ActionButton { text: backend.busy?"Cancel":"Close"; icon: "close"; onClicked: backend.busy?backend.cancel():window.close() } }
     }
     ConversionPrompts { id: prompts; objectName: "conversionPrompts" }
     FormatGuide { id: formatGuide; parent: Overlay.overlay }

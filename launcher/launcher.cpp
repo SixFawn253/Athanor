@@ -342,10 +342,9 @@ static int applyUpdate(const fs::path &self, const std::vector<std::wstring> &ar
     }
     try
     {
-        HANDLE app =
-            start(target,
-                  env(L"ATHANOR_TEST").empty() ? std::vector<std::wstring>{} : std::vector<std::wstring>{L"--cli"},
-                  false, false);
+        HANDLE app = start(
+            target, env(L"ATHANOR_TEST").empty() ? std::vector<std::wstring>{} : std::vector<std::wstring>{L"--cli"},
+            false, false);
         CloseHandle(app);
         std::error_code cleanupError;
         fs::remove(backup, cleanupError);
@@ -475,7 +474,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
         ReleaseMutex(mutex);
         CloseHandle(mutex);
         mutex = nullptr;
-        fs::path settings = root / L"settings";
+        fs::path settings = env(L"ATHANOR_SETTINGS_DIR");
+        if (settings.empty() && (fs::is_regular_file(fs::path(self).parent_path() / L"settings.json") ||
+                                 fs::is_regular_file(fs::path(self).parent_path() / L"updates.ini")))
+            settings = fs::path(self).parent_path();
+        if (settings.empty())
+            settings = root / L"settings";
+        rejectLinks(settings);
         fs::create_directories(settings);
         SetEnvironmentVariableW(L"ATHANOR_SETTINGS_DIR", settings.c_str());
         SetEnvironmentVariableW(L"ATHANOR_LAUNCHER_PATH", self.c_str());

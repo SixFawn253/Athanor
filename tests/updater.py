@@ -56,6 +56,11 @@ with tempfile.TemporaryDirectory(prefix="athanor-updater-") as folder:
 
     release.update(tag_name="alpha-9.9", name="Athanor 9.9", draft=False, prerelease=False, assets=[asset])
     check_release(True)
+    if system == "Windows":
+        env.pop("ATHANOR_LAUNCHER_PATH")
+        assert check_release(True)["can_install"], "Writable folder edition hid the install action"
+        env["ATHANOR_LAUNCHER_PATH"] = str(binary)
+        assert check_release(True)["can_install"], "Single-file edition hid the install action"
     asset["name"] = "Athanor-Alpha-9.9-OtherOS-x64.exe"
     check_release(False)
     asset["name"] = expected

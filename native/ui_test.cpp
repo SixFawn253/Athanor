@@ -68,13 +68,13 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
         QJsonObject state;
         for (auto label :
              {"pages", "convertPage", "transitionCover", "queueCard", "queueHeader", "outputCard", "savePath",
-              "browseButton", "overallProgress", "queueOverall", "progressCell0", "progressTrack0", "progressLabel0", "statusGlyph0"})
+              "browseButton", "downloadUpdateButton", "settingsDownloadButton", "overallProgress", "queueOverall", "progressCell0", "progressTrack0", "progressLabel0", "statusGlyph0"})
         {
             auto *item = findVisualItem(window->contentItem(), label);
             if (item)
             {
                 QJsonObject info;
-                for (auto property : {"visible", "x", "y", "width", "height", "currentIndex", "progress", "value", "available"})
+                for (auto property : {"visible", "enabled", "text", "x", "y", "width", "height", "currentIndex", "progress", "value", "available"})
                     if (item->property(property).isValid())
                         info[property] = QJsonValue::fromVariant(item->property(property));
                 state[label] = info;

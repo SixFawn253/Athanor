@@ -63,7 +63,9 @@ Updater::Updater(QObject *owner) : QObject(owner), controller(owner)
 bool Updater::canInstall() const
 {
 #ifdef Q_OS_WIN
-    return !pending && !asset.isEmpty() && !qEnvironmentVariable("ATHANOR_LAUNCHER_PATH").isEmpty();
+    const QFileInfo target(Platform::installRoot());
+    return !pending && !asset.isEmpty() && target.isFile() && !target.isSymLink() && target.isWritable() &&
+           QFileInfo(target.absolutePath()).isWritable();
 #else
     return !pending && !asset.isEmpty() && UnixUpdate::canInstall();
 #endif
@@ -130,8 +132,9 @@ void Updater::check()
                         break;
                     }
                 }
-                message =
-                    asset.isEmpty() ? "This release has no verified " + Platform::name() + " download for this architecture yet." : version + " is available.";
+                message = asset.isEmpty() ? "This release has no verified " + Platform::name() +
+                                                " download for this architecture yet."
+                                          : version + " is available.";
                 if (!asset.isEmpty() && !canInstall())
                     message += " Use a writable portable installation to install updates.";
             }
@@ -158,7 +161,8 @@ void Updater::install()
         return;
     }
     const auto suffix = Platform::releaseAsset("0").endsWith(".tar.gz") ? ".tar.gz"
-                        : Platform::releaseAsset("0").endsWith(".zip") ? ".zip" : ".exe";
+                        : Platform::releaseAsset("0").endsWith(".zip")  ? ".zip"
+                                                                        : ".exe";
     auto file = std::make_shared<QFile>(folder + "/update-" + QUuid::createUuid().toString(QUuid::Id128) + suffix);
     if (!file->open(QIODevice::WriteOnly | QIODevice::NewOnly))
     {
@@ -167,6 +171,8 @@ void Updater::install()
         return;
     }
     pending = true;
+    downloadActive = true;
+    controller->setProperty("updating", true);
     percent = 0;
     message = "Downloading " + version + "…";
     emit changed();
@@ -198,6 +204,8 @@ void Updater::install()
         bool flushed = file->flush();
         file->close();
         pending = false;
+        downloadActive = false;
+        controller->setProperty("updating", false);
         bool valid = reply->error() == QNetworkReply::NoError && flushed && *count == expected &&
                      hash->result().toHex() == digest.toLatin1();
         reply->deleteLater();
@@ -216,9 +224,11 @@ void Updater::install()
             return;
         }
 #ifdef Q_OS_WIN
-        QString launcher = qEnvironmentVariable("ATHANOR_LAUNCHER_PATH");
-        QStringList args{"--apply-update", launcher, QString::number(QCoreApplication::applicationPid()),
-                         qEnvironmentVariable("ATHANOR_LAUNCHER_PID", "0"), digest};
+        QString launcher = Platform::installRoot();
+        qputenv("ATHANOR_SETTINGS_DIR", Platform::settingsDirectory().toUtf8());
+        QStringList args{
+            "--apply-update", launcher, QString::number(QCoreApplication::applicationPid()),
+            qEnvironmentVariable("ATHANOR_LAUNCHER_PID", QString::number(QCoreApplication::applicationPid())), digest};
         if (!QProcess::startDetached(file->fileName(), args, QFileInfo(launcher).absolutePath()))
         {
             file->remove();
