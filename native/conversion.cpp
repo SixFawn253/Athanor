@@ -36,14 +36,11 @@ static void fail(const QString &text)
     throw std::runtime_error(text.toUtf8().constData());
 }
 
-static QString tool(QString name)
+static QString tool(const QString &name)
 {
-#ifdef Q_OS_WIN
-    name += ".exe";
-#endif
-    const QString path = QCoreApplication::applicationDirPath() + "/tools/" + name;
-    if (!QFileInfo::exists(path))
-        fail("Missing bundled tool: " + name);
+    const auto path = Platform::toolPath(name);
+    if (path.isEmpty())
+        fail("Missing conversion tool: " + name);
     return path;
 }
 
@@ -355,11 +352,11 @@ static Frames readFrames(const QString &path, bool strict8bit = false)
             }
             if (animated)
             {
-                Scratch temp(QCoreApplication::applicationDirPath() + "/.athanor-apng-XXXXXX");
+                Scratch temp(Platform::scratchPattern("athanor-apng"));
                 if (!temp.isValid())
                     fail("Cannot create animation workspace");
-                auto result = process(tool("ffmpeg"), {"-nostdin", "-hide_banner", "-v", "error", "-i", path, "-vsync",
-                                                       "0", "-pix_fmt", "rgba", temp.path() + "/frame-%08d.png"});
+                auto result = process(tool("ffmpeg"), {"-nostdin", "-hide_banner", "-v", "error", "-i", path, "-fps_mode",
+                                                       "passthrough", "-pix_fmt", "rgba", temp.path() + "/frame-%08d.png"});
                 if (result.code)
                     fail(QString::fromUtf8(result.error));
                 auto names = QDir(temp.path()).entryList({"frame-*.png"}, QDir::Files, QDir::Name);
@@ -468,7 +465,7 @@ static Frames readFrames(const QString &path, bool strict8bit = false)
         return f;
     if (strict8bit)
         fail("Lossless decoding is not available for this source format");
-    Scratch temp(QCoreApplication::applicationDirPath() + "/.athanor-decode-XXXXXX");
+    Scratch temp(Platform::scratchPattern("athanor-decode"));
     QStringList decode = {"-nostdin", "-hide_banner", "-v", "error"};
     decode << decoderArguments(path) << "-i" << path << "-frames:v" << "1" << "-pix_fmt" << "rgba"
            << temp.path() + "/decoded.png";
@@ -1004,7 +1001,7 @@ static QStringList gifFilters(const Options &options, bool preview)
 }
 static QByteArray alphaFingerprint(const QString &path, const Options &o, bool original, bool preview)
 {
-    Scratch temp(QCoreApplication::applicationDirPath() + "/.athanor-alpha-XXXXXX");
+    Scratch temp(Platform::scratchPattern("athanor-alpha"));
     if (!temp.isValid())
         fail("Cannot create transparency validation workspace");
     QString file = temp.path() + "/alpha.raw";
@@ -1021,7 +1018,7 @@ static QByteArray alphaFingerprint(const QString &path, const Options &o, bool o
     if (original && preview)
         args << "-t" << "1";
     filters << "format=rgba" << "alphaextract";
-    args << "-vf" << filters.join(',') << "-vsync" << "0" << "-pix_fmt" << "gray" << "-f" << "rawvideo" << file;
+    args << "-vf" << filters.join(',') << "-fps_mode" << "passthrough" << "-pix_fmt" << "gray" << "-f" << "rawvideo" << file;
     auto result = process(tool("ffmpeg"), args);
     if (result.code)
         fail("Transparency decode failed: " + QString::fromUtf8(result.error));
@@ -1211,7 +1208,7 @@ static QString video(const QString &source, const QString &destination, const Op
         {
             filters = gifFilters(o, preview);
             if (o.videoLossless && o.video == "mkv")
-                args << "-vsync" << "0";
+                args << "-fps_mode" << "passthrough";
         }
         if (!filters.isEmpty())
             args << "-vf" << filters.join(',');

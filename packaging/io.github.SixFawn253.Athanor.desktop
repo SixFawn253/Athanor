@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Athanor
+Comment=Convert and compress images, audio, video and PDFs
+Exec=Athanor %F
+Icon=io.github.SixFawn253.Athanor
+Terminal=false
+Categories=AudioVideo;Graphics;Utility;
+MimeType=image/png;image/jpeg;image/webp;image/avif;image/heif;image/heic;video/mp4;video/webm;video/x-matroska;audio/mpeg;audio/ogg;audio/x-wav;application/pdf;

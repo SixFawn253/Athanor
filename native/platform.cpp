@@ -1,5 +1,6 @@
 #include "platform.h"
 #include "conversion.h"
+#include "desktopintegration.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -9,10 +10,16 @@
 #include <QStyleHints>
 #include <QSystemTrayIcon>
 #include <QTimer>
+#include <QStandardPaths>
+#include <QElapsedTimer>
+#ifdef Q_OS_LINUX
+#include <QDBusInterface>
+#endif
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shellapi.h>
 #else
+#include <cstdio>
 #include <signal.h>
 #include <unistd.h>
 #ifdef Q_OS_LINUX
@@ -20,6 +27,9 @@
 #include <linux/fs.h>
 #include <sys/syscall.h>
 #endif
+#endif
+#ifdef Q_OS_MACOS
+bool athanorMacAnimationsEnabled();
 #endif
 void Platform::setupProcess(ChildProcess *process, bool workerGroup)
 {
@@ -33,6 +43,8 @@ bool Platform::publish(const QString &from, const QString &to)
 {
 #ifdef Q_OS_WIN
     return MoveFileExW(reinterpret_cast<LPCWSTR>(from.utf16()), reinterpret_cast<LPCWSTR>(to.utf16()), 0) != 0;
+#elif defined(Q_OS_MACOS)
+    return renamex_np(QFile::encodeName(from).constData(), QFile::encodeName(to).constData(), RENAME_EXCL) == 0;
 #elif defined(Q_OS_LINUX)
     return syscall(SYS_renameat2, AT_FDCWD, QFile::encodeName(from).constData(), AT_FDCWD,
                    QFile::encodeName(to).constData(), RENAME_NOREPLACE) == 0;
@@ -113,19 +125,25 @@ bool Platform::contextMenu(bool enabled, const QString &executable, QString *err
         *error = "Windows could not save the context menu settings";
     return ok;
 #else
-    Q_UNUSED(enabled);
-    Q_UNUSED(executable);
-    if (error)
-        *error = "File manager integration is configured by the Linux package";
-    return true;
+    return DesktopIntegration::configure(enabled, executable, error);
 #endif
 }
 void Platform::notify(const QString &title, const QString &message)
 {
+#ifdef Q_OS_LINUX
+    QDBusInterface notifications("org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+                                 "org.freedesktop.Notifications");
+    if (notifications.isValid())
+    {
+        notifications.asyncCallWithArgumentList("Notify", {"Athanor", uint(0), "io.github.SixFawn253.Athanor",
+                                                          title, message, QStringList{}, QVariantMap{}, 5000});
+        return;
+    }
+#endif
     static QSystemTrayIcon *tray = nullptr;
     if (!tray)
     {
-        tray = new QSystemTrayIcon(QIcon(QCoreApplication::applicationDirPath() + "/assets/athanor.ico"), qApp);
+        tray = new QSystemTrayIcon(QIcon(Platform::assetPath("athanor.ico")), qApp);
         tray->setToolTip("Athanor");
         tray->show();
     }
@@ -150,8 +168,33 @@ bool Platform::animationsEnabled()
     BOOL enabled = TRUE;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
     return enabled;
+#elif defined(Q_OS_MACOS)
+    return ::athanorMacAnimationsEnabled();
 #else
-    QSettings desktop("org.gnome.desktop.interface", QSettings::NativeFormat);
-    return desktop.value("enable-animations", true).toBool();
+    // GNOME stores this preference in dconf, not in a QSettings ini file.
+    // Cache the short subprocess query to keep the UI's polling timer cheap.
+    static QElapsedTimer checked;
+    static bool enabled = true;
+    if (checked.isValid() && checked.elapsed() < 5000)
+        return enabled;
+    checked.start();
+    const auto desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
+    if (desktop.contains("KDE", Qt::CaseInsensitive))
+    {
+        QSettings settings(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/kdeglobals", QSettings::IniFormat);
+        enabled = settings.value("KDE/AnimationDurationFactor", 1.0).toDouble() > 0;
+    }
+    else
+    {
+        const auto gsettings = QStandardPaths::findExecutable("gsettings");
+        if (!gsettings.isEmpty())
+        {
+            QProcess process;
+            process.start(gsettings, {"get", "org.gnome.desktop.interface", "enable-animations"});
+            if (process.waitForFinished(500) && process.exitCode() == 0)
+                enabled = process.readAllStandardOutput().trimmed() != "false";
+        }
+    }
+    return enabled;
 #endif
 }

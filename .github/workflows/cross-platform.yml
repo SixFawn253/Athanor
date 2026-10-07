@@ -1,0 +1,144 @@
+name: Cross-platform build and feature parity
+on:
+  push:
+    branches: [main, 'port/**']
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          brew install qtbase qtdeclarative qtshadertools qtsvg qtimageformats libavif libheif mupdf ffmpeg-full ninja
+          echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH"
+      - name: Configure and build the common sources
+        run: |
+          cmake -S . -B .build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix)" -DBUILD_TESTING=ON
+          cmake --build .build/native -j2
+      - name: Platform and conversion tests
+        run: ctest --test-dir .build/native --output-on-failure
+      - name: UI regression captures
+        run: python3 tests/ui.py .build/native/native/Athanor.app/Contents/MacOS/Athanor .build/ui
+      - name: Bundle and verify the installed app
+        run: python3 scripts/package.py .build/native .build/packages
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macOS-${{ matrix.runner }}
+          path: |
+            .build/packages/*.zip
+            .build/packages/ui-packaged
+            .build/ui
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        id: codec-cache
+        with:
+          path: |
+            .build/codecs
+            .build/sdk
+          key: linux-codecs-${{ hashFiles('scripts/build-linux-codecs.sh') }}
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libaom-dev libdav1d-dev libde265-dev libx265-dev libwebp-dev libpng-dev libjpeg-dev ffmpeg libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 xvfb openbox patchelf
+          bash scripts/build-linux-codecs.sh
+          echo "$PWD/.build/sdk/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache/save@v4
+        if: steps.codec-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .build/codecs
+            .build/sdk
+          key: ${{ steps.codec-cache.outputs.cache-primary-key }}
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          modules: 'qtshadertools qtimageformats'
+          cache: true
+      - name: Configure and build the common sources
+        run: |
+          cmake -S . -B .build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;$PWD/.build/sdk" -DBUILD_TESTING=ON
+          cmake --build .build/native -j2
+      - name: Platform and conversion tests
+        run: ctest --test-dir .build/native --output-on-failure
+      - name: UI regression captures
+        # Window-scoped shortcuts need an active window. Xvfb alone supplies
+        # an X server, but no window manager to activate windows/popups.
+        run: xvfb-run -a sh -c 'openbox >/tmp/athanor-openbox.log 2>&1 & exec python3 tests/ui.py .build/native/native/Athanor .build/ui'
+      - name: Bundle and verify the installed app
+        run: xvfb-run -a sh -c 'openbox >/tmp/athanor-openbox.log 2>&1 & exec python3 scripts/package.py .build/native .build/packages'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Linux-x64
+          path: |
+            .build/packages/*.tar.gz
+            .build/packages/ui-packaged
+            .build/ui
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-shadertools
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-qt6-imageformats
+            mingw-w64-ucrt-x86_64-libavif
+            mingw-w64-ucrt-x86_64-libheif
+            mingw-w64-ucrt-x86_64-libwebp
+            mingw-w64-ucrt-x86_64-libmupdf
+            mingw-w64-ucrt-x86_64-ffmpeg
+      - name: Configure and build the common sources
+        run: |
+          cmake -S . -B .build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build .build/native -j2
+      - name: Platform and conversion tests
+        run: ATHANOR_TOOLS_DIR="$(cygpath -m "$MINGW_PREFIX/bin")" ctest --test-dir .build/native --output-on-failure
+      - name: UI regression captures
+        run: ATHANOR_TOOLS_DIR="$(cygpath -m "$MINGW_PREFIX/bin")" python tests/ui.py .build/native/native/Athanor.exe .build/ui
+      - name: Bundle and verify the installed app
+        run: python scripts/package.py .build/native .build/packages
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Preserve the single-file Windows portable distribution
+        shell: pwsh
+        run: ./pack-portable.ps1 -Runtime .build/packages/Athanor -Output .build/packages/Athanor-Alpha-1.1-Windows-x64.exe
+      - name: Launch the single-file distribution without developer tools
+        run: python tests/windows_portable.py .build/packages/Athanor-Alpha-1.1-Windows-x64.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-x64
+          path: |
+            .build/packages/*.exe
+            .build/packages/ui-packaged
+            .build/ui

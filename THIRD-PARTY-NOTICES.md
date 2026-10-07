@@ -9,3 +9,12 @@
 - Microsoft Visual C++ runtime: Microsoft redistributable runtime binaries.
 
 License notices from the original dependency packages are retained in the licenses folder. Athanor uses the native libraries directly; Python is not included in the runtime.
+
+The versions and Windows build provenance above describe the original managed
+runtime. Cross-platform builds use the native dependencies documented in
+README.md. macOS bundles preserve Homebrew formula/build provenance and the
+installed dependency environment in `Contents/Resources/DEPENDENCIES.txt`;
+Windows MSYS2 builds retain their package license texts. Linux builds retain
+the MuPDF 1.28.2, libavif 1.4.2 and libheif 1.23.6 license texts alongside
+the system dependency copyright notices. Public releases must retain the
+corresponding dependency sources and build configuration as applicable.

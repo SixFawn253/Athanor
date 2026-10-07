@@ -14,5 +14,5 @@ ColumnLayout {
         Text { Layout.fillWidth: true; text: control.label.toUpperCase(); font.pixelSize: 11; color: Theme.muted }
         ActionButton { quiet: true; icon: "info"; implicitWidth: 24; implicitHeight: 24; accessibleText: control.label+" format information"; tooltip: "About "+Formats.info(control.value).name; onClicked: control.infoRequested(control.value) }
     }
-    Field { id: field; Layout.fillWidth: true; accessibleLabel: control.label; model: Formats.names(control.formats); transparencyIndices: Formats.alphaIndices(control.formats); compactIndices: Formats.compactIndices(control.formats); currentIndex: control.formats.indexOf(control.value); enabled: !backend.busy; onActivated: backend.setOption(control.optionKey,control.formats[index]==="jpg-pages"?"jpg":control.formats[index]) }
+    Field { id: field; Layout.fillWidth: true; accessibleLabel: control.label; model: Formats.names(control.formats); transparencyIndices: Formats.alphaIndices(control.formats); compactIndices: Formats.compactIndices(control.formats); currentIndex: control.formats.indexOf(control.value); enabled: !backend.busy; onActivated: function(index){backend.setOption(control.optionKey,control.formats[index]==="jpg-pages"?"jpg":control.formats[index]) } }
 }

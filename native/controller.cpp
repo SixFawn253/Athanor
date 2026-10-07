@@ -117,9 +117,7 @@ Controller::Controller(bool quick, QObject *parent) : QObject(parent), compact(q
 {
     revealDeadline.setSingleShot(true);
     connect(&revealDeadline, &QTimer::timeout, this, &Controller::transitionExpired);
-    QString settingsDirectory = qEnvironmentVariable("ATHANOR_SETTINGS_DIR");
-    if (settingsDirectory.isEmpty())
-        settingsDirectory = QCoreApplication::applicationDirPath();
+    QString settingsDirectory = Platform::settingsDirectory();
     QDir().mkpath(settingsDirectory);
     settingsPath = settingsDirectory + "/settings.json";
     QFile file(settingsPath);
@@ -751,7 +749,14 @@ void Controller::launchPreview(const QString &source, int quality, int)
     previewRunning = true;
     previewFailure.clear();
     previewAfter.clear();
-    previewDirectory = std::make_unique<Scratch>(QCoreApplication::applicationDirPath() + "/.athanor-preview-XXXXXX");
+    previewDirectory = std::make_unique<Scratch>(Platform::scratchPattern("athanor-preview"));
+    if (!previewDirectory->isValid())
+    {
+        previewFailure = "Cannot create preview workspace";
+        previewRunning = false;
+        emit previewChanged();
+        return;
+    }
     previewProcess = new ChildProcess(this);
     int generation = ++previewGeneration;
     auto *p = previewProcess;
@@ -774,12 +779,20 @@ void Controller::launchPreview(const QString &source, int quality, int)
     }
     QString job = previewDirectory->path() + "/job.json";
     QFile file(job);
-    file.open(QIODevice::WriteOnly);
-    file.write(QJsonDocument(QJsonObject{{"source", source},
+    const auto jobBytes = QJsonDocument(QJsonObject{{"source", source},
                                          {"preview", true},
                                          {"options", options.json()},
                                          {"scratch", previewDirectory->path()}})
-                   .toJson());
+                   .toJson();
+    if (!file.open(QIODevice::WriteOnly) || file.write(jobBytes) != jobBytes.size() || !file.flush())
+    {
+        previewFailure = "Cannot write preview job";
+        previewRunning = false;
+        p->deleteLater();
+        previewProcess = nullptr;
+        emit previewChanged();
+        return;
+    }
     file.close();
     connect(p, qOverload<int, QProcess::ExitStatus>(&ChildProcess::finished), this,
             [this, p, generation](int, QProcess::ExitStatus) {

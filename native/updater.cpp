@@ -1,4 +1,6 @@
 #include "updater.h"
+#include "platform.h"
+#include "unixupdate.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
@@ -30,14 +32,22 @@ static QNetworkRequest request(const QUrl &url)
 }
 Updater::Updater(QObject *owner) : QObject(owner), controller(owner)
 {
-    auto folder = qEnvironmentVariable("ATHANOR_SETTINGS_DIR", QCoreApplication::applicationDirPath());
+    auto folder = Platform::settingsDirectory();
     preferences = folder + "/updates.ini";
+    QDir().mkpath(folder);
     QDir downloads(folder + "/updates");
-    for (const auto &name : downloads.entryList({"update-*.exe"}, QDir::Files))
-        if (QRegularExpression("^update-[0-9a-f]{32}\\.exe$").match(name).hasMatch())
+    for (const auto &name : downloads.entryList({"update-*"}, QDir::Files))
+        if (QRegularExpression("^update-[0-9a-f]{32}\\.(?:exe|zip|tar\\.gz)$").match(name).hasMatch())
             QFile::remove(downloads.filePath(name));
     autoCheck = QSettings(preferences, QSettings::IniFormat).value("automatic", true).toBool();
     message = "Athanor " + QCoreApplication::applicationVersion();
+    QFile updateError(folder + "/update-error.txt");
+    if (updateError.open(QIODevice::ReadOnly))
+    {
+        message = QString::fromUtf8(updateError.readAll());
+        updateError.close();
+        updateError.remove();
+    }
     timer.setInterval(6 * 60 * 60 * 1000);
     connect(&timer, &QTimer::timeout, this, [this] {
         if (autoCheck)
@@ -55,7 +65,7 @@ bool Updater::canInstall() const
 #ifdef Q_OS_WIN
     return !pending && !asset.isEmpty() && !qEnvironmentVariable("ATHANOR_LAUNCHER_PATH").isEmpty();
 #else
-    return false;
+    return !pending && !asset.isEmpty() && UnixUpdate::canInstall();
 #endif
 }
 void Updater::setAutomatic(bool value)
@@ -70,7 +80,7 @@ void Updater::check()
         return;
     pending = true;
     percent = 0;
-    message = "Checking GitHubâ€¦";
+    message = "Checking GitHub…";
     emit changed();
     QUrl endpoint(releaseApi);
     if (qEnvironmentVariableIsSet("ATHANOR_TEST") && qEnvironmentVariableIsSet("ATHANOR_TEST_UPDATE_API"))
@@ -78,11 +88,13 @@ void Updater::check()
     auto reply = network.get(request(endpoint));
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         pending = false;
+        asset = {};
+        version.clear();
         auto bytes = reply->readAll();
         auto code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError)
-            message = code == 403 || code == 429 ? "GitHubâ€™s request limit was reached. Try again later."
-                                                 : "Couldnâ€™t check for updates. Try again when connected.";
+            message = code == 403 || code == 429 ? "GitHub’s request limit was reached. Try again later."
+                                                 : "Couldn’t check for updates. Try again when connected.";
         else
         {
             QJsonParseError error;
@@ -104,7 +116,7 @@ void Updater::check()
             {
                 asset = {};
                 version.clear();
-                QString name = "Athanor-Alpha-" + match.captured(1) + "-Windows-x64.exe";
+                QString name = Platform::releaseAsset(match.captured(1));
                 for (auto value : release.value("assets").toArray())
                 {
                     auto a = value.toObject();
@@ -119,9 +131,9 @@ void Updater::check()
                     }
                 }
                 message =
-                    asset.isEmpty() ? "This release has no verified Windows download yet." : version + " is available.";
-                if (!asset.isEmpty() && qEnvironmentVariable("ATHANOR_LAUNCHER_PATH").isEmpty())
-                    message += " Run the single-file portable edition to install updates.";
+                    asset.isEmpty() ? "This release has no verified " + Platform::name() + " download for this architecture yet." : version + " is available.";
+                if (!asset.isEmpty() && !canInstall())
+                    message += " Use a writable portable installation to install updates.";
             }
         }
         reply->deleteLater();
@@ -145,7 +157,9 @@ void Updater::install()
         emit changed();
         return;
     }
-    auto file = std::make_shared<QFile>(folder + "/update-" + QUuid::createUuid().toString(QUuid::Id128) + ".exe");
+    const auto suffix = Platform::releaseAsset("0").endsWith(".tar.gz") ? ".tar.gz"
+                        : Platform::releaseAsset("0").endsWith(".zip") ? ".zip" : ".exe";
+    auto file = std::make_shared<QFile>(folder + "/update-" + QUuid::createUuid().toString(QUuid::Id128) + suffix);
     if (!file->open(QIODevice::WriteOnly | QIODevice::NewOnly))
     {
         message = "Cannot save the update. Check free disk space.";
@@ -154,7 +168,7 @@ void Updater::install()
     }
     pending = true;
     percent = 0;
-    message = "Downloading " + version + "â€¦";
+    message = "Downloading " + version + "…";
     emit changed();
     QUrl download(asset.value("browser_download_url").toString());
     if (qEnvironmentVariableIsSet("ATHANOR_TEST") && qEnvironmentVariableIsSet("ATHANOR_TEST_UPDATE_DOWNLOAD"))
@@ -201,17 +215,29 @@ void Updater::install()
             emit changed();
             return;
         }
+#ifdef Q_OS_WIN
         QString launcher = qEnvironmentVariable("ATHANOR_LAUNCHER_PATH");
         QStringList args{"--apply-update", launcher, QString::number(QCoreApplication::applicationPid()),
                          qEnvironmentVariable("ATHANOR_LAUNCHER_PID", "0"), digest};
         if (!QProcess::startDetached(file->fileName(), args, QFileInfo(launcher).absolutePath()))
         {
             file->remove();
-            message = "Couldnâ€™t start the update. Your current app is unchanged.";
+            message = "Couldn’t start the update. Your current app is unchanged.";
             emit changed();
             return;
         }
-        message = "Restarting Athanorâ€¦";
+#else
+        QStringList args{"--apply-update", file->fileName(), Platform::installRoot(),
+                         QString::number(QCoreApplication::applicationPid()), digest};
+        if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), args))
+        {
+            file->remove();
+            message = "Could not start the update helper.";
+            emit changed();
+            return;
+        }
+#endif
+        message = "Restarting Athanor…";
         emit changed();
         QCoreApplication::quit();
     });

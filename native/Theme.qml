@@ -23,7 +23,7 @@ QtObject {
     readonly property color checkerA: dark ? "#242731" : "#d5cfdf"
     readonly property color checkerB: dark ? "#414655" : "#f7f5fb"
     readonly property color error: dark ? "#ffa3b1" : "#ab3049"
-    readonly property string numericFont: "Consolas"
+    readonly property string numericFont: nativePlatform==="Windows" ? "Consolas" : nativePlatform==="macOS" ? "Menlo" : "monospace"
     readonly property int controlHeight: 42
     readonly property int radius: 12
     readonly property int cardRadius: 16

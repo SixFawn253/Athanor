@@ -3,6 +3,13 @@
 #include <QString>
 namespace Platform
 {
+QString name();
+QString settingsDirectory();
+QString scratchPattern(const QString &);
+QString toolPath(const QString &);
+QString assetPath(const QString &);
+QString installRoot();
+QString releaseAsset(const QString &version);
 void setupProcess(ChildProcess *, bool workerGroup = false);
 void cancelProcess(ChildProcess *);
 bool publish(const QString &, const QString &);
