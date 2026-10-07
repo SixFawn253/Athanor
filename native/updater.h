@@ -7,6 +7,7 @@ class Updater : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString status READ status NOTIFY changed)
+    Q_PROPERTY(QString portableUrl READ portableUrl NOTIFY changed)
     Q_PROPERTY(QString availableVersion READ availableVersion NOTIFY changed)
     Q_PROPERTY(bool working READ working NOTIFY changed)
     Q_PROPERTY(bool downloading READ downloading NOTIFY changed)
@@ -23,6 +24,11 @@ class Updater : public QObject
     {
         return version;
     }
+    QString portableUrl() const
+    {
+        return asset.value("browser_download_url").toString();
+    }
+    Q_INVOKABLE void openPortableDownload();
     bool working() const
     {
         return pending;

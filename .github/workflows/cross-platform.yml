@@ -131,9 +131,9 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Preserve the single-file Windows portable distribution
         shell: pwsh
-        run: ./pack-portable.ps1 -Runtime .build/packages/Athanor -Output .build/packages/Athanor-Alpha-1.3.0-Windows-x64.exe
+        run: ./pack-portable.ps1 -Runtime .build/packages/Athanor -Output .build/packages/Athanor-Alpha-1.4.0-Windows-x64.exe
       - name: Launch the single-file distribution without developer tools
-        run: python tests/windows_portable.py .build/packages/Athanor-Alpha-1.3.0-Windows-x64.exe
+        run: python tests/windows_portable.py .build/packages/Athanor-Alpha-1.4.0-Windows-x64.exe
       - uses: actions/upload-artifact@v4
         if: always()
         with:

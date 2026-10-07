@@ -2,6 +2,7 @@
 #include "platform.h"
 #include "unixupdate.h"
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -142,6 +143,12 @@ void Updater::check()
         reply->deleteLater();
         emit changed();
     });
+}
+void Updater::openPortableDownload()
+{
+    const QUrl url(portableUrl());
+    if (trustedAsset(url))
+        QDesktopServices::openUrl(url);
 }
 void Updater::install()
 {

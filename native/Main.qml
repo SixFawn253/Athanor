@@ -59,10 +59,7 @@ ApplicationWindow {
         Image { Layout.preferredWidth: 25; Layout.preferredHeight: 25; sourceSize: Qt.size(50,50); source: "image://icons/brand-mark/"+window.fg.toString().substring(1) }
         Text { text: "ATHANOR"; color: window.fg; font.pixelSize: 20; font.bold: true }
         Item { Layout.fillWidth: true }
-        RowLayout { visible: updater.availableVersion.length>0; spacing: 10
-            Text { text: updater.availableVersion; color: Theme.muted; font.pixelSize: 12 }
-            ActionButton { objectName: "downloadUpdateButton"; text: updater.downloading?"Downloading "+updater.progress+"%":"Download"; primary: true; enabled: updater.canInstall&&!backend.busy&&!backend.previewBusy; tooltip: "Download, verify and install the update, then restart Athanor. The current queue will be cleared."; onClicked: updater.install() }
-        }
+        ActionButton { objectName: "downloadUpdateButton"; text: updater.downloading?"Updating "+updater.progress+"%":"Update available"; visible: updater.availableVersion.length>0; quiet: true; icon: "info"; onClicked: updateNotice.open() }
         ActionButton { objectName: "settingsButton"; Layout.preferredWidth: 42; quiet: true; selected: window.page===1; icon: "settings"; accessibleText: "Settings"; tooltip: "Settings · Ctrl+,"; onClicked: window.showPage(window.page===1 ? 0 : 1) }
         ActionButton { objectName: "helpButton"; Layout.preferredWidth: 42; quiet: true; icon: "help"; accessibleText: "Help"; tooltip: "Help"; onClicked: help.open() }
     }
@@ -92,8 +89,11 @@ ApplicationWindow {
                         id: toolbar
                         spacing: 0
                         ActionButton { joined: true; large: true; objectName: "addFilesButton"; text: "Add files"; icon: "file-plus"; radius: 16; rightRounded: false; onClicked: backend.addFiles() }
+                        Item { width: 1; height: 52; Divider { anchors.centerIn: parent; height: 24 } }
                         ActionButton { joined: true; large: true; text: "Add folder"; icon: "folder-plus"; leftRounded: false; rightRounded: false; onClicked: backend.addFolder(window.includeSubfolders) }
+                        Item { width: 1; height: 52; Divider { anchors.centerIn: parent; height: 24 } }
                         ActionButton { joined: true; large: true; text: "Remove"; icon: "remove"; leftRounded: false; rightRounded: false; enabled: !backend.busy&&window.selectedRow>=0; onClicked: { backend.remove(window.selectedRow); window.selectedRow=-1 } }
+                        Item { width: 1; height: 52; Divider { anchors.centerIn: parent; height: 24 } }
                         ActionButton { joined: true; large: true; text: "Clear"; icon: "trash"; radius: 16; leftRounded: false; enabled: backend.count>0&&!backend.busy; onClicked: { backend.clear(); window.selectedRow=-1 } }
                     }
                 }
@@ -249,12 +249,12 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             implicitHeight: updatesContent.implicitHeight+32
                             ColumnLayout { id: updatesContent; anchors.fill: parent; anchors.margins: 16; spacing: 12
-                                Text { Layout.fillWidth: true; text: "Download installs the update automatically and restarts Athanor. Your current queue will be cleared; saved settings and originals are kept."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap }
+                                Text { Layout.fillWidth: true; text: "Download a portable copy, or update this installation in place and restart. In-place updates use application data on this computer."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.Wrap }
                                 Check { text: "Automatically check GitHub for updates"; checked: updater.automatic; onToggled: updater.automatic=checked }
                                 RowLayout { Layout.fillWidth: true
                                     Text { Layout.fillWidth: true; text: updater.status; color: Theme.muted; wrapMode: Text.Wrap; font.pixelSize: 13 }
                                     ActionButton { text: "Check now"; enabled: !updater.working; onClicked: updater.check() }
-                                    ActionButton { objectName: "settingsDownloadButton"; text: updater.downloading?"Downloading "+updater.progress+"%":"Download"; primary: true; visible: updater.availableVersion.length>0; enabled: updater.canInstall&&!backend.busy&&!backend.previewBusy; tooltip: "Download and automatically apply the update, then restart."; onClicked: updater.install() }
+                                    ActionButton { objectName: "settingsDownloadButton"; text: updater.downloading?"Updating "+updater.progress+"%":"Choose update"; primary: true; visible: updater.availableVersion.length>0; enabled: updater.canInstall&&!backend.busy&&!backend.previewBusy; tooltip: "Choose a portable download or an in-place update"; onClicked: updateNotice.open() }
                                 }
                                 ProgressBar { Layout.fillWidth: true; visible: updater.working; from: 0; to: 100; value: updater.progress; indeterminate: updater.progress===0; palette.highlight: Theme.accent }
                             }
@@ -298,6 +298,7 @@ ApplicationWindow {
         }
         NumberAnimation { id: reveal; target: transitionCover; property: "progress"; from: 0; to: 1.01; duration: Theme.pageDuration; easing.type: Easing.InOutCubic; onFinished: transitionCover.visible=false }
     }
+    UpdateNotice { id: updateNotice; parent: Overlay.overlay }
     ConversionPrompts { id: prompts; objectName: "conversionPrompts" }
     FormatGuide { id: formatGuide; parent: Overlay.overlay }
     Preview { id: preview; parent: Overlay.overlay }

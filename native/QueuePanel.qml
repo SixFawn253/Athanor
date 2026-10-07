@@ -62,6 +62,8 @@ Card {
             Layout.rightMargin: -16
             implicitHeight: 38
             color: Theme.header
+            border.width: 1
+            border.color: Theme.groupBorder
             Row {
                 anchors.fill: parent
                 anchors.leftMargin: 16
@@ -74,11 +76,12 @@ Card {
                         required property string modelData
                         width: panel.sizes[index]
                         height: 38
-                        Text { anchors.fill: parent; rightPadding: 10; leftPadding: index===0 ? 4 : 0; text: heading.modelData; color: Theme.muted; font.pixelSize: 11; wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter; horizontalAlignment: index>=1&&index<=4 ? Text.AlignRight : Text.AlignLeft }
-                        MouseArea { visible: heading.index<7; x: parent.width-4; width: 8; height: parent.height; cursorShape: Qt.SplitHCursor; hoverEnabled: true; property real initialX: 0; property var original: []
+                        Text { anchors.fill: parent; rightPadding: 10; leftPadding: index===0 ? 4 : 6; text: heading.modelData; color: Theme.muted; font.pixelSize: 12; font.weight: Font.Medium; wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter; horizontalAlignment: index>=1&&index<=4 ? Text.AlignRight : Text.AlignLeft }
+                        MouseArea { visible: heading.index<7; x: parent.width-5; width: 10; height: parent.height; cursorShape: Qt.SplitHCursor; hoverEnabled: true; property real initialX: 0; property var original: []
                             onPressed: function(mouse){ initialX=mapToItem(header,mouse.x,mouse.y).x;original=panel.widths.slice() }
                             onPositionChanged: function(mouse){if(pressed)panel.resizeColumn(heading.index,mapToItem(header,mouse.x,mouse.y).x-initialX,original)}
-                            Rectangle { anchors.centerIn: parent; height: 18; width: 2; radius: 1; color: Theme.accent; visible: parent.containsMouse||parent.pressed }
+                            Divider { anchors.centerIn: parent; height: 22; width: parent.containsMouse||parent.pressed?2:1; color: parent.containsMouse||parent.pressed?Theme.accent:Theme.border }
+                            Hint { visible: parent.containsMouse&&!parent.pressed; text: "Drag to resize columns" }
                         }
                     }
                 }

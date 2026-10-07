@@ -7,7 +7,7 @@ Item {
     property bool valid: !backend.options.size_mode || targetValid
     property int selectedIndex: backend.options.convert_only ? 2 : backend.options.size_mode ? 1 : 0
     implicitHeight: 44
-    Rectangle { anchors.fill: parent; color: Theme.surfaceAlt; topLeftRadius: 16; topRightRadius: 16 }
+    Rectangle { anchors.fill: parent; color: Theme.header; topLeftRadius: 16; topRightRadius: 16 }
     Row {
         anchors.fill: parent
         Repeater {
@@ -52,7 +52,8 @@ Item {
                     width: 0
                     height: width
                     radius: width/2
-                    color: Theme.hover
+                    color: Theme.stateLayer
+                    opacity: Theme.hoverOpacity
 
                 }
                 NumberAnimation { id: hoverTransition; objectName: "tabHoverAnimation"+tab.index; target: hoverReveal; property: "width"; duration: Theme.reveal; easing.type: Easing.OutCubic }
@@ -65,11 +66,12 @@ Item {
                     NumberAnimation { target: ripple; property: "opacity"; to: 0; duration: Theme.fast }
                 }
                 Text { anchors.centerIn: parent; text: tab.modelData; font.pixelSize: 13; font.weight: choice.selectedIndex===tab.index ? Font.DemiBold : Font.Normal; color: choice.selectedIndex===tab.index ? (Theme.accent) : (Theme.muted); fontSizeMode: Text.Fit; width: parent.width-16; horizontalAlignment: Text.AlignHCenter }
-                Rectangle { anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; width: choice.selectedIndex===tab.index ? parent.width-32 : 0; height: 2; color: Theme.accent; Behavior on width { NumberAnimation { duration: Theme.fast } } }
+                Rectangle { anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; width: choice.selectedIndex===tab.index ? parent.width-32 : 0; height: 2; radius: 1; color: Theme.accent; Behavior on width { NumberAnimation { duration: Theme.fast } } }
                 Rectangle { anchors.fill: parent; anchors.margins: 3; color: "transparent"; border.width: 2; border.color: Theme.accent; visible: tab.activeFocus&&Theme.keyboardFocus(tab.focusReason) }
                 HoverHandler { id: tabHover; objectName: "tabPointer"+tab.index; cursorShape: backend.busy ? Qt.ArrowCursor : Qt.PointingHandCursor }
                 MouseArea { id: mouse; objectName: "tabMouse"+tab.index; anchors.fill: parent; hoverEnabled: true; enabled: !backend.busy; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: { tab.forceActiveFocus(Qt.MouseFocusReason); pulse.restart(); backend.setOption("mode",["quality","target","convert"][tab.index]) } }
             }
         }
     }
+    Rectangle { anchors.fill: parent; topLeftRadius: 16; topRightRadius: 16; color: "transparent"; border.width: 1; border.color: Theme.groupBorder; z: 2 }
 }

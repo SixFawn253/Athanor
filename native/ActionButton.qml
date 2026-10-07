@@ -16,7 +16,7 @@ Control {
     property bool selected: false
     property bool leftRounded: true
     property bool rightRounded: true
-    property int radius: sidebar ? 0 : 12
+    property int radius: sidebar ? 0 : Theme.radius
     property color normalColor: primary ? Theme.accent : selected ? Theme.selection : quiet ? "transparent" : Theme.field
     property color foreground: !enabled ? Theme.disabled : primary ? Theme.onAccent : selected ? Theme.accent : Theme.text
     function activate(){if(enabled){pulse.restart();clicked()}}
@@ -51,8 +51,8 @@ Control {
             width: hover.hovered && control.enabled ? Math.sqrt(parent.width*parent.width + parent.height*parent.height)*2 : 0
             height: width
             radius: width/2
-            color: Theme.hover
-            opacity: control.primary ? 0.22 : 1
+            color: control.foreground
+            opacity: Theme.hoverOpacity
             Behavior on width { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
         }
         Rectangle {
@@ -61,7 +61,7 @@ Control {
             width: 0
             height: width
             radius: width/2
-            color: Theme.accent
+            color: control.primary ? control.foreground : Theme.accent
             opacity: 0
         }
     }
@@ -98,7 +98,7 @@ Control {
     SequentialAnimation {
         id: pulse
         PropertyAction { target: ripple; property: "width"; value: 0 }
-        PropertyAction { target: ripple; property: "opacity"; value: 0.75 }
+        PropertyAction { target: ripple; property: "opacity"; value: control.primary ? 0.12 : 0.22 }
         NumberAnimation { target: ripple; property: "width"; to: Math.sqrt(control.width*control.width+control.height*control.height)*2; duration: Theme.reveal; easing.type: Easing.OutCubic }
         NumberAnimation { target: ripple; property: "opacity"; to: 0; duration: Theme.fast }
     }

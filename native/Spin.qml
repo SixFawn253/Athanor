@@ -40,7 +40,7 @@ SpinBox {
     NumberAnimation { id: fade; target: number; property: "opacity"; from: .35; to: 1; duration: Theme.fast }
     up.indicator: Rectangle {
         x: control.width-width; width: 28; height: control.height
-        topRightRadius: 12; bottomRightRadius: 12
+        topRightRadius: Theme.radius; bottomRightRadius: Theme.radius
         color: control.up.pressed ? (Theme.selection) : control.up.hovered ? (Theme.hover) : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.fast } }
         Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 19; color: control.upAvailable ? (Theme.text) : (Theme.disabled) }
@@ -48,7 +48,7 @@ SpinBox {
     }
     down.indicator: Rectangle {
         x: 0; width: 28; height: control.height
-        topLeftRadius: 12; bottomLeftRadius: 12
+        topLeftRadius: Theme.radius; bottomLeftRadius: Theme.radius
         color: control.down.pressed ? (Theme.selection) : control.down.hovered ? (Theme.hover) : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.fast } }
         Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 19; color: control.downAvailable ? (Theme.text) : (Theme.disabled) }

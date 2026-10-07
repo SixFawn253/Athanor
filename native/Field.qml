@@ -18,7 +18,7 @@ ComboBox {
         Text { anchors.fill: parent; leftPadding: 14; rightPadding: 34+(badge.visible?22:0)+(compactBadge.visible?22:0); verticalAlignment: Text.AlignVCenter; text: control.displayText; color: control.enabled ? Theme.text : Theme.disabled; font: control.font; elide: Text.ElideRight }
     }
     background: Rectangle {
-        radius: 12
+        radius: Theme.radius
         color: control.hovered ? (Theme.hover) : (Theme.field)
         border.width: control.activeFocus&&Theme.keyboardFocus(control.focusReason) ? 2 : 1
         border.color: !control.enabled ? Theme.softBorder : control.activeFocus&&Theme.keyboardFocus(control.focusReason) ? Theme.accent : Theme.border
@@ -31,7 +31,7 @@ ComboBox {
         id: option
         required property int index
         required property var modelData
-        width: control.popup.width
+        width: formatList.width
         height: Theme.controlHeight
         hoverEnabled: true
         highlighted: control.highlightedIndex===index
@@ -42,12 +42,8 @@ ComboBox {
         }
         leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
         background: Rectangle {
-            color: option.hovered || option.highlighted ? (Theme.hover) : option.index===control.currentIndex ? (Theme.selection) : (Theme.field)
-            topLeftRadius: option.index===0 ? 12 : 0
-            topRightRadius: topLeftRadius
-            bottomLeftRadius: option.index===control.count-1 ? 12 : 0
-            bottomRightRadius: bottomLeftRadius
-            Behavior on color { ColorAnimation { duration: Theme.fast } }
+            color: option.index===control.currentIndex ? Theme.selection : Theme.menuSurface
+            Rectangle { anchors.fill: parent; color: Theme.stateLayer; opacity: option.hovered||option.highlighted?Theme.hoverOpacity:0; Behavior on opacity { NumberAnimation { duration: Theme.fast } } }
         }
     }
     popup: Popup {
@@ -59,10 +55,23 @@ ComboBox {
         x: control.width+6
         y: (control.height-height)/2
         width: Math.max(control.width,190)
-        implicitHeight: Math.min(control.count*Theme.controlHeight,320)
-        padding: 0
-        margins: 0
-        background: Rectangle { radius: 12; color: Theme.field }
-        contentItem: ListView { clip: true; implicitHeight: Math.min(contentHeight,320); spacing: 0; boundsBehavior: Flickable.StopAtBounds; model: control.popup.visible ? control.delegateModel : null; currentIndex: control.highlightedIndex; ScrollIndicator.vertical: ScrollIndicator {} }
+        readonly property real maximumMenuHeight: Math.max(Theme.controlHeight,control.Overlay.overlay?control.Overlay.overlay.height-26:480)
+        implicitHeight: Math.min(control.count*Theme.controlHeight,maximumMenuHeight)+2
+        padding: 1
+        margins: 12
+        background: Rectangle { radius: Theme.radius; color: Theme.menuSurface; border.width: 1; border.color: Theme.border }
+        contentItem: Item {
+            id: menuViewport
+            implicitHeight: Math.min(formatList.contentHeight,control.popup.maximumMenuHeight)
+            layer.enabled: true
+            layer.effect: ShaderEffect {
+                property var source
+                property vector2d dimensions: Qt.vector2d(menuViewport.width,menuViewport.height)
+                property vector2d cornerRadii: Qt.vector2d(Theme.radius-1,Theme.radius-1)
+                property vector2d bottomRadii: cornerRadii
+                fragmentShader: "qrc:/shaders/rounded-mask.frag.qsb"
+            }
+            ListView { id: formatList; objectName: "formatMenuList"; anchors.fill: parent; clip: true; spacing: 0; boundsBehavior: Flickable.StopAtBounds; model: control.popup.visible ? control.delegateModel : null; currentIndex: control.highlightedIndex; ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; visible: formatList.contentHeight>formatList.height+0.5; width: 6; contentItem: Rectangle { implicitWidth: 4; radius: 2; color: Theme.muted } } }
+        }
     }
 }

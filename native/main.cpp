@@ -142,7 +142,7 @@ int main(int argc, char **argv)
 #endif
     Application application(argc, argv);
     application.setApplicationName("Athanor");
-    application.setApplicationVersion("1.3.0");
+    application.setApplicationVersion("1.4.0");
     application.setQuitOnLastWindowClosed(true);
     QImageReader::setAllocationLimit(0);
     QQuickStyle::setStyle("Basic");

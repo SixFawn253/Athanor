@@ -230,6 +230,13 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                         {
                             auto *popupWindow = content->window();
                             popupWindow->grabWindow().save(folder + "/dropdown-popup-light.png");
+                            auto *list = content->findChild<QQuickItem *>("formatMenuList");
+                            if (list)
+                            {
+                                list->setProperty("contentY", qMax(0.0, list->property("contentHeight").toDouble()-list->height()));
+                                popupWindow->grabWindow().save(folder + "/dropdown-scrolled-light.png");
+                                list->setProperty("contentY", 0);
+                            }
                             // Exercise the second row with real pointer events, rather than
                             // invoking activation directly (which misses click-through bugs).
                             QPointF pos = content->mapToScene(QPointF(80, 60));
@@ -586,6 +593,24 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
             }
             controller->setOption("mode", "quality");
             controller->setAppearance("Dark");
+            if (qEnvironmentVariableIsSet("ATHANOR_TEST_UPDATE_API"))
+            {
+                auto *button = window->findChild<QObject *>("downloadUpdateButton");
+                if (button && button->property("visible").toBool())
+                {
+                    QMetaObject::invokeMethod(button, "clicked");
+                    QTimer::singleShot(120, controller, [=] {
+                        auto *notice = window->findChild<QObject *>("updateNotice");
+                        auto *link = window->findChild<QObject *>("portableDownloadLink");
+                        if (!notice || !notice->property("visible").toBool() || !link ||
+                            !link->property("text").toString().contains("github.com/SixFawn253/Athanor/releases/download/"))
+                            *error += "Update choices or embedded portable link missing\n";
+                        capture("update-choices-dark");
+                        end();
+                    });
+                    return;
+                }
+            }
             end();
             return;
         }

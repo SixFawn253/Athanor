@@ -93,9 +93,10 @@ try:
                 capture_output=True,text=True,encoding='utf8',timeout=45)
             result = json.loads((captures/'ui-result.json').read_text(encoding='utf8'))
             assert r.returncode == 0 and result['ok'],(result.get('errors'),r.stderr)
-            assert json.loads(settingsFile.read_text(encoding='utf8'))['appearance'] == 'Dark'
-            if mode == 'folder': assert not (cache/'settings/settings.json').exists()
-            print(mode,'retains settings location on subsequent launch',flush=True)
+            installedSettings = cache/'settings/settings.json'
+            assert json.loads(installedSettings.read_text(encoding='utf8'))['appearance'] == 'Dark'
+            assert (cache/'.installed').exists()
+            print(mode,'uses installed storage after in-place update; settings preserved',flush=True)
 finally:
     server.shutdown()
     assert originals == {p.name:(p.stat().st_size,p.stat().st_mtime_ns) for p in fixtures.iterdir() if p.is_file()}

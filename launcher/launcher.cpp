@@ -298,6 +298,37 @@ static void waitForExit(const std::wstring &value)
     if (result != WAIT_OBJECT_0)
         fail("Close all Athanor windows and try the update again.");
 }
+static fs::path installedRoot()
+{
+    auto override = env(L"ATHANOR_PORTABLE_CACHE");
+    if (!override.empty())
+        return fs::path(override);
+    PWSTR local = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local)))
+        fail("Cannot locate application data.");
+    fs::path root = fs::path(local) / L"Athanor";
+    CoTaskMemFree(local);
+    return root;
+}
+static std::wstring installedHash(const fs::path &target)
+{
+    wchar_t value[128]{};
+    DWORD size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Athanor\\Installations", target.c_str(), RRF_RT_REG_SZ, nullptr,
+                     value, &size) != ERROR_SUCCESS)
+        return {};
+    return value;
+}
+static void setInstalledHash(const fs::path &target, const std::wstring &hash)
+{
+    if (!env(L"ATHANOR_TEST").empty())
+        return;
+    if (hash.empty())
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\Athanor\\Installations", target.c_str());
+    else if (RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\Athanor\\Installations", target.c_str(), REG_SZ,
+                             hash.c_str(), DWORD((hash.size() + 1) * sizeof(wchar_t))) != ERROR_SUCCESS)
+        fail("Cannot save installed update mode.");
+}
 static int applyUpdate(const fs::path &self, const std::vector<std::wstring> &args)
 {
     if (args.size() != 5 || args[4].size() != 64 || fileDigest(self) != args[4])
@@ -310,6 +341,28 @@ static int applyUpdate(const fs::path &self, const std::vector<std::wstring> &ar
         fail("The downloaded app could not start. Your portable app is unchanged.");
     waitForExit(args[2]);
     waitForExit(args[3]);
+    auto dataRoot = installedRoot();
+    rejectLinks(dataRoot);
+    auto settings = dataRoot / L"settings";
+    rejectLinks(settings);
+    fs::create_directories(settings);
+    fs::path previousSettings = env(L"ATHANOR_SETTINGS_DIR");
+    if (!previousSettings.empty() &&
+        fs::absolute(previousSettings).lexically_normal() != fs::absolute(settings).lexically_normal())
+    {
+        rejectLinks(previousSettings);
+        for (const auto *name : {L"settings.json", L"updates.ini"})
+            if (fs::is_regular_file(previousSettings / name))
+                fs::copy_file(previousSettings / name, settings / name, fs::copy_options::overwrite_existing);
+    }
+    SetEnvironmentVariableW(L"ATHANOR_SETTINGS_DIR", settings.c_str());
+    SetEnvironmentVariableW(L"ATHANOR_INSTALLED", L"1");
+    HANDLE marker = CreateFileW((dataRoot / L".installed").c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                                FILE_ATTRIBUTE_HIDDEN, nullptr);
+    if (marker == INVALID_HANDLE_VALUE)
+        fail("Cannot prepare the installed update.");
+    CloseHandle(marker);
+
     GUID id{};
     CoCreateGuid(&id);
     wchar_t guid[40]{};
@@ -340,8 +393,10 @@ static int applyUpdate(const fs::path &self, const std::vector<std::wstring> &ar
         fs::remove(backup);
         fail("Windows is still using the portable app. Close its other windows and try again.");
     }
+    const auto previousMode = installedHash(target);
     try
     {
+        setInstalledHash(target, payloadHash);
         HANDLE app = start(
             target, env(L"ATHANOR_TEST").empty() ? std::vector<std::wstring>{} : std::vector<std::wstring>{L"--cli"},
             false, false);
@@ -352,6 +407,7 @@ static int applyUpdate(const fs::path &self, const std::vector<std::wstring> &ar
     catch (...)
     {
         MoveFileExW(backup.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        setInstalledHash(target, previousMode);
         throw;
     }
     return 0;
@@ -382,15 +438,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
         self.resize(length);
         if (!args.empty() && args[0] == L"--apply-update")
             return applyUpdate(self, args);
+        bool installed = env(L"ATHANOR_INSTALLED") == L"1" || installedHash(fs::path(self)) == payloadHash;
         fs::path root = env(L"ATHANOR_PORTABLE_CACHE");
         if (root.empty())
-        {
-            PWSTR local = nullptr;
-            if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local)))
-                fail("Cannot locate your application data folder.");
-            root = fs::path(local) / L"Athanor";
-            CoTaskMemFree(local);
-        }
+            root = installed ? installedRoot() : fs::path(self).parent_path() / L".athanor";
+        if (fs::exists(root / L".installed"))
+            installed = true;
         root = fs::absolute(root).lexically_normal();
         rejectLinks(root);
         fs::create_directories(root);
@@ -464,7 +517,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
             CloseHandle(marker);
             if (!valid(staging))
                 fail("The bundled runtime is incomplete. Download Athanor again.");
-            fs::rename(staging, cache);
+            std::error_code moveError;
+            for (int attempt = 0; attempt < 50; ++attempt)
+            {
+                fs::rename(staging, cache, moveError);
+                if (!moveError) break;
+                Sleep(100);
+                pump();
+            }
+            if (moveError) fail("Cannot finish preparing the portable runtime. Close other Athanor windows and try again.");
             staging.clear();
         }
         usage = CreateFileW((cache / L".in-use").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
@@ -475,13 +536,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, wchar_t *, int)
         CloseHandle(mutex);
         mutex = nullptr;
         fs::path settings = env(L"ATHANOR_SETTINGS_DIR");
-        if (settings.empty() && (fs::is_regular_file(fs::path(self).parent_path() / L"settings.json") ||
-                                 fs::is_regular_file(fs::path(self).parent_path() / L"updates.ini")))
+        if (settings.empty() && !installed &&
+            (fs::is_regular_file(fs::path(self).parent_path() / L"settings.json") ||
+             fs::is_regular_file(fs::path(self).parent_path() / L"updates.ini")))
             settings = fs::path(self).parent_path();
         if (settings.empty())
             settings = root / L"settings";
         rejectLinks(settings);
         fs::create_directories(settings);
+        if (!installed && env(L"ATHANOR_PORTABLE_CACHE").empty() && !fs::exists(settings / L"settings.json"))
+        {
+            auto legacy = installedRoot() / L"settings";
+            for (const auto *name : {L"settings.json", L"updates.ini"})
+                if (fs::is_regular_file(legacy / name) && !fs::exists(settings / name))
+                    fs::copy_file(legacy / name, settings / name);
+        }
         SetEnvironmentVariableW(L"ATHANOR_SETTINGS_DIR", settings.c_str());
         SetEnvironmentVariableW(L"ATHANOR_LAUNCHER_PATH", self.c_str());
         SetEnvironmentVariableW(L"ATHANOR_LAUNCHER_PID", std::to_wstring(GetCurrentProcessId()).c_str());
