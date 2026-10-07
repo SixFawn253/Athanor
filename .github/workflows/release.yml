@@ -75,9 +75,19 @@ jobs:
           for tag, title, notes, paths, latest in [
               (f'v{version}', f'Alpha {version} — macOS', 'Adds overall queue progress and savings, hardware-adaptive parallel conversions and shortest-job-first scheduling. Fixes format selector clicks.\n\nDownload arm64 for Apple Silicon or x64 for Intel. Extract the ZIP and open Athanor.app. The app is ad hoc signed and is not Apple-notarized.', mac, 'false'),
               (f'alpha-{version}', f'Alpha {version} — Windows', 'Adds overall queue progress and savings, hardware-adaptive parallel conversions and shortest-job-first scheduling. Fixes format selector clicks.\n\nDownload and run the Windows x64 EXE.', [windows], 'true')]:
-              gh('release', 'create', tag, '--repo', repo, '--target', sha, '--title', title, '--notes', notes, '--draft')
-              gh('release', 'upload', tag, '--repo', repo, *map(str, paths))
-              release = json.loads(gh('api', f'repos/{repo}/releases/tags/{tag}'))
+              releases = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
+              existing = [r for r in releases if r['tag_name'] == tag]
+              if not existing:
+                  gh('release', 'create', tag, '--repo', repo, '--target', sha, '--title', title, '--notes', notes, '--draft')
+                  releases = json.loads(gh('api', f'repos/{repo}/releases?per_page=100'))
+                  existing = [r for r in releases if r['tag_name'] == tag]
+              assert len(existing) == 1
+              release = existing[0]
+              assert release['target_commitish'] == sha, 'Release must refer to the verified build'
+              if release['draft']:
+                  gh('release', 'upload', tag, '--repo', repo, '--clobber', *map(str, paths))
+              # GitHub's tag endpoint excludes drafts; use the stable release ID.
+              release = json.loads(gh('api', f"repos/{repo}/releases/{release['id']}"))
               assets = {a['name']: a for a in release['assets']}
               assert set(assets) == {p.name for p in paths}
               for path in paths:
