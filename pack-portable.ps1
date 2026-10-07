@@ -4,7 +4,7 @@ param(
     [string] $SevenZip = 'C:/Program Files/7-Zip'
 )
 $ErrorActionPreference = 'Stop'
-if (!$Output) { $Output = Join-Path $PSScriptRoot '../outputs/Athanor-Alpha-1.4.0-Windows-x64.exe' }
+if (!$Output) { $Output = Join-Path $PSScriptRoot '../outputs/Athanor-Alpha-0.5.0-Windows-x64.exe' }
 $runtimePath = (Resolve-Path -LiteralPath $Runtime).Path
 $outputPath = [IO.Path]::GetFullPath($Output)
 $outputFolder = [IO.Path]::GetDirectoryName($outputPath)

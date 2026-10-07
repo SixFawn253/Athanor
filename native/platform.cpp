@@ -42,7 +42,15 @@ void Platform::cancelProcess(ChildProcess *process)
 bool Platform::publish(const QString &from, const QString &to)
 {
 #ifdef Q_OS_WIN
-    return MoveFileExW(reinterpret_cast<LPCWSTR>(from.utf16()), reinterpret_cast<LPCWSTR>(to.utf16()), 0) != 0;
+    auto extendedPath = [](const QString &path) {
+        QString absolute = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
+        if (absolute.startsWith("\\\\?\\"))
+            return absolute;
+        return absolute.startsWith("\\\\") ? "\\\\?\\UNC\\" + absolute.mid(2) : "\\\\?\\" + absolute;
+    };
+    const auto nativeFrom = extendedPath(from), nativeTo = extendedPath(to);
+    return MoveFileExW(reinterpret_cast<LPCWSTR>(nativeFrom.utf16()), reinterpret_cast<LPCWSTR>(nativeTo.utf16()), 0) !=
+           0;
 #elif defined(Q_OS_MACOS)
     return renamex_np(QFile::encodeName(from).constData(), QFile::encodeName(to).constData(), RENAME_EXCL) == 0;
 #elif defined(Q_OS_LINUX)
@@ -85,8 +93,11 @@ bool Platform::contextMenu(bool enabled, const QString &executable, QString *err
     const QString prefix = "HKEY_CURRENT_USER\\Software\\Classes\\SystemFileAssociations\\.";
     const QStringList images = Conversion::imageExtensions(), videos = Conversion::videoExtensions(),
                       audios = Conversion::audioExtensions();
-    auto install = [&](const QString &extension, const QStringList &targets, const QStringList &labels) {
-        QSettings root(prefix + extension + "\\shell\\Athanor", QSettings::NativeFormat);
+    auto install = [&](const QString &extension, const QStringList &targets, const QStringList &labels,
+                       bool folder = false) {
+        QSettings root(folder ? "HKEY_CURRENT_USER\\Software\\Classes\\Directory\\shell\\Athanor"
+                              : prefix + extension + "\\shell\\Athanor",
+                       QSettings::NativeFormat);
         root.remove("");
         if (!enabled)
         {
@@ -101,8 +112,9 @@ bool Platform::contextMenu(bool enabled, const QString &executable, QString *err
             QString key = "shell/" + targets[i];
             root.setValue(key + "/MUIVerb", labels[i]);
             root.setValue(key + "/MultiSelectModel", "Player");
-            root.setValue(key + "/command/.",
-                          '"' + QDir::toNativeSeparators(executable) + "\" --quick --target " + targets[i] + " \"%1\"");
+            root.setValue(key + "/command/.", '"' + QDir::toNativeSeparators(executable) + "\" --quick " +
+                                                  (folder ? "--include-subfolders " : "") + "--target " + targets[i] +
+                                                  " \"%1\"");
         }
         root.sync();
         return root.status() == QSettings::NoError;
@@ -121,6 +133,7 @@ bool Platform::contextMenu(bool enabled, const QString &executable, QString *err
     for (auto e : audios)
         ok = install(e, {"opus", "mp3", "wav"}, {"Convert to Opus", "Convert to MP3", "Convert to WAV"}) && ok;
     ok = install("pdf", {"pdf", "pdf-jpg"}, {"Compress PDF", "Export JPG pages"}) && ok;
+    ok = install("", {"auto"}, {"Compress / convert folder…"}, true) && ok;
     if (!ok && error)
         *error = "Windows could not save the context menu settings";
     return ok;
@@ -135,8 +148,8 @@ void Platform::notify(const QString &title, const QString &message)
                                  "org.freedesktop.Notifications");
     if (notifications.isValid())
     {
-        notifications.asyncCallWithArgumentList("Notify", {"Athanor", uint(0), "io.github.SixFawn253.Athanor",
-                                                          title, message, QStringList{}, QVariantMap{}, 5000});
+        notifications.asyncCallWithArgumentList("Notify", {"Athanor", uint(0), "io.github.SixFawn253.Athanor", title,
+                                                           message, QStringList{}, QVariantMap{}, 5000});
         return;
     }
 #endif
@@ -181,7 +194,8 @@ bool Platform::animationsEnabled()
     const auto desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
     if (desktop.contains("KDE", Qt::CaseInsensitive))
     {
-        QSettings settings(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/kdeglobals", QSettings::IniFormat);
+        QSettings settings(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/kdeglobals",
+                           QSettings::IniFormat);
         enabled = settings.value("KDE/AnimationDurationFactor", 1.0).toDouble() > 0;
     }
     else

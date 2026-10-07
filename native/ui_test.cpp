@@ -19,11 +19,13 @@
 #include "platform.h"
 static QString fixtureRoot()
 {
-    return qEnvironmentVariable("ATHANOR_TEST_FIXTURES", QCoreApplication::applicationDirPath() + "/../CompressionTest");
+    return qEnvironmentVariable("ATHANOR_TEST_FIXTURES",
+                                QCoreApplication::applicationDirPath() + "/../CompressionTest");
 }
 static QString testOutput(const QString &name)
 {
-    return QDir(qEnvironmentVariable("ATHANOR_TEST_OUTPUT_DIR", Platform::settingsDirectory() + "/tests")).filePath(name);
+    return QDir(qEnvironmentVariable("ATHANOR_TEST_OUTPUT_DIR", Platform::settingsDirectory() + "/tests"))
+        .filePath(name);
 }
 static QQuickItem *findVisualItem(QQuickItem *root, const QString &name)
 {
@@ -68,13 +70,15 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
         QJsonObject state;
         for (auto label :
              {"pages", "convertPage", "transitionCover", "queueCard", "queueHeader", "outputCard", "savePath",
-              "browseButton", "downloadUpdateButton", "settingsDownloadButton", "overallProgress", "queueOverall", "progressCell0", "progressTrack0", "progressLabel0", "statusGlyph0"})
+              "browseButton", "downloadUpdateButton", "settingsDownloadButton", "overallProgress", "queueOverall",
+              "progressCell0", "progressTrack0", "progressLabel0", "statusGlyph0"})
         {
             auto *item = findVisualItem(window->contentItem(), label);
             if (item)
             {
                 QJsonObject info;
-                for (auto property : {"visible", "enabled", "text", "x", "y", "width", "height", "currentIndex", "progress", "value", "available"})
+                for (auto property : {"visible", "enabled", "text", "x", "y", "width", "height", "currentIndex",
+                                      "progress", "value", "available"})
                     if (item->property(property).isValid())
                         info[property] = QJsonValue::fromVariant(item->property(property));
                 state[label] = info;
@@ -96,6 +100,8 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
     {
         QueueItem row;
         row.source = fixtureRoot() + "/Apple_first_logo.png";
+        if (!compact && i < 3)
+            row.groupRoot = fixtureRoot();
         row.before = QFileInfo(row.source).size();
         if (i % 2)
         {
@@ -221,10 +227,14 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                         // Native popup windows may be clamped to a small desktop.
                         // Keep checking centering whenever it fits, and require a
                         // clamped popup to remain completely on the same screen.
-                        const auto expectedY = (field->property("height").toDouble() - popup->property("height").toDouble()) / 2;
+                        const auto expectedY =
+                            (field->property("height").toDouble() - popup->property("height").toDouble()) / 2;
                         if (qAbs(popup->property("y").toDouble() - expectedY) > 1 &&
                             (!content || !content->window() ||
-                             !window->screen()->availableGeometry().adjusted(-2, -2, 2, 2).contains(content->window()->frameGeometry())))
+                             !window->screen()
+                                  ->availableGeometry()
+                                  .adjusted(-2, -2, 2, 2)
+                                  .contains(content->window()->frameGeometry())))
                             *error += "Dropdown is misaligned or outside the available desktop\n";
                         if (content && content->window())
                         {
@@ -233,7 +243,8 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                             auto *list = content->findChild<QQuickItem *>("formatMenuList");
                             if (list)
                             {
-                                list->setProperty("contentY", qMax(0.0, list->property("contentHeight").toDouble()-list->height()));
+                                list->setProperty(
+                                    "contentY", qMax(0.0, list->property("contentHeight").toDouble() - list->height()));
                                 popupWindow->grabWindow().save(folder + "/dropdown-scrolled-light.png");
                                 list->setProperty("contentY", 0);
                             }
@@ -480,8 +491,7 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                     auto preview = window->findChild<QObject *>("previewDialog");
                     if (preview)
                     {
-                        QString fixture = QUrl::fromLocalFile(fixtureRoot() + "/Apple_first_logo.png")
-                                              .toString();
+                        QString fixture = QUrl::fromLocalFile(fixtureRoot() + "/Apple_first_logo.png").toString();
                         preview->setProperty("sources", QVariantList{fixture, fixture});
                     }
                     if (preview)
@@ -603,7 +613,8 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                         auto *notice = window->findChild<QObject *>("updateNotice");
                         auto *link = window->findChild<QObject *>("portableDownloadLink");
                         if (!notice || !notice->property("visible").toBool() || !link ||
-                            !link->property("text").toString().contains("github.com/SixFawn253/Athanor/releases/download/"))
+                            !link->property("text").toString().contains(
+                                "github.com/SixFawn253/Athanor/releases/download/"))
                             *error += "Update choices or embedded portable link missing\n";
                         capture("update-choices-dark");
                         end();
@@ -891,4 +902,61 @@ void runSchedulingTest(Controller *controller, const QString &fixtures)
         end();
     });
     QTimer::singleShot(0, controller, &Controller::start);
+}
+
+void runFolderTest(Controller *controller, const QString &root)
+{
+    auto phase = std::make_shared<int>(0);
+    auto errors = std::make_shared<QString>();
+    auto finish = [=] {
+        Conversion::writeLine({{"ok", errors->isEmpty()}, {"error", *errors}});
+        QCoreApplication::exit(errors->isEmpty() ? 0 : 1);
+    };
+    const QString source = QDir(root).filePath("Source");
+    const QString output = QDir(root).filePath("results");
+    controller->setOption("output", output);
+    controller->setOption("image", "png");
+    controller->setOption("delete", false);
+    QObject::connect(controller, &Controller::filesAdded, controller, [=] {
+        const int expected = *phase == 0 ? 1 : 3;
+        if (controller->count() != expected || controller->groupCount(source) != expected)
+            *errors += "Recursive folder contents or grouping incorrect; ";
+        for (const auto &item : controller->queue()->items)
+        {
+            if (item.groupRoot != source)
+                *errors += "Folder group lost; ";
+            const int row = int(&item - controller->queue()->items.constData());
+            auto key = controller->queue()->data(controller->queue()->index(row), QueueModel::FolderSection).toString();
+            auto section = controller->folderSectionInfo(key);
+            if (section.value("path").toString() != QFileInfo(item.source).absolutePath() ||
+                section.value("count").toInt() != 1)
+                *errors += "Subfolder section incorrect; ";
+        }
+        if (*phase == 0)
+        {
+            *phase = 1;
+            controller->clear();
+            controller->addUrls({QUrl::fromLocalFile(source)}, true);
+        }
+        else
+            controller->start();
+    });
+    QObject::connect(controller, &Controller::batchFinished, controller, [=](int success, int failed, int cancelled) {
+        if (success != 3 || failed || cancelled)
+            *errors += "Folder batch failed; ";
+        for (const auto &item : controller->queue()->items)
+        {
+            QString relative = QDir(source).relativeFilePath(QFileInfo(item.source).absolutePath());
+            const QString expected = QDir::cleanPath(QDir(output).filePath("Source/" + relative));
+            if (QFileInfo(item.output).absolutePath() != expected || !QFileInfo::exists(item.output) ||
+                !QFileInfo::exists(item.source))
+                *errors += "Output tree or originals were not retained; ";
+        }
+        finish();
+    });
+    QTimer::singleShot(30000, controller, [=] {
+        *errors += "Folder test timed out; ";
+        finish();
+    });
+    controller->addPaths({source}, false);
 }

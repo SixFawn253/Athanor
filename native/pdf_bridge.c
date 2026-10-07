@@ -126,8 +126,56 @@ int athanor_pdf_snapshot(const char *path, athanor_pdf_record record, void *user
     return count;
 }
 
-static void resize_soft_mask(fz_context *ctx, pdf_document *doc, pdf_obj *object, fz_image *image, int width,
-                             int height)
+/* MuPDF's conversion cannot discard alpha on every pixmap layout. Keep it
+   during colour conversion, then copy
+ * straight colour samples for the PDF's
+   separately stored colour stream. Never composite onto a background. */
+static fz_pixmap *pdf_color_samples(fz_context *ctx, fz_pixmap *source, fz_colorspace *space)
+{
+    fz_pixmap *converted = NULL, *plain = NULL;
+    fz_color_params colors = {0, 1, 0, 0};
+    fz_var(converted);
+    fz_var(plain);
+    fz_try(ctx)
+    {
+        converted = fz_convert_pixmap(ctx, source, space, NULL, NULL, colors, 1);
+        if (!fz_pixmap_alpha(ctx, converted))
+        {
+            plain = converted;
+            converted = NULL;
+        }
+        else
+        {
+            int w = fz_pixmap_width(ctx, converted), h = fz_pixmap_height(ctx, converted);
+            int n = fz_colorspace_n(ctx, space), components = fz_pixmap_components(ctx, converted);
+            plain = fz_new_pixmap(ctx, space, w, h, NULL, 0);
+            for (int y = 0; y < h; ++y)
+            {
+                const unsigned char *s = fz_pixmap_samples(ctx, converted) + y * fz_pixmap_stride(ctx, converted);
+                unsigned char *d = fz_pixmap_samples(ctx, plain) + y * fz_pixmap_stride(ctx, plain);
+                for (int x = 0; x < w; ++x, s += components, d += n)
+                {
+                    int alpha = s[components - 1];
+                    for (int c = 0; c < n; ++c)
+                        d[c] = alpha ? (unsigned char)fz_mini(255, (s[c] * 255 + alpha / 2) / alpha) : 0;
+                }
+            }
+        }
+    }
+    fz_always(ctx)
+    {
+        fz_drop_pixmap(ctx, converted);
+    }
+    fz_catch(ctx)
+    {
+        fz_drop_pixmap(ctx, plain);
+        fz_rethrow(ctx);
+    }
+    return plain;
+}
+
+static void resize_soft_mask(fz_context *ctx, pdf_document *doc, pdf_obj *object, fz_image *image, fz_pixmap *pixels,
+                             int width, int height)
 {
     fz_pixmap *mask = NULL, *gray = NULL, *scaled = NULL;
     fz_buffer *buffer = NULL;
@@ -138,13 +186,23 @@ static void resize_soft_mask(fz_context *ctx, pdf_document *doc, pdf_obj *object
     fz_var(buffer);
     fz_var(dictionary);
     fz_var(reference);
-    if (!image->mask || !pdf_dict_get(ctx, object, PDF_NAME(SMask)))
+    int separate = image->mask && pdf_dict_get(ctx, object, PDF_NAME(SMask));
+    if (!separate && !fz_pixmap_alpha(ctx, pixels))
         return;
     fz_try(ctx)
     {
-        fz_color_params colors = {0, 1, 0, 0};
-        mask = fz_get_unscaled_pixmap_from_image(ctx, image->mask);
-        gray = fz_convert_pixmap(ctx, mask, fz_device_gray(ctx), NULL, NULL, colors, 0);
+        mask = separate ? fz_get_unscaled_pixmap_from_image(ctx, image->mask)
+                        : fz_new_pixmap_from_alpha_channel(ctx, pixels);
+        if (!fz_pixmap_colorspace(ctx, mask))
+        {
+            int w = fz_pixmap_width(ctx, mask), h = fz_pixmap_height(ctx, mask);
+            gray = fz_new_pixmap(ctx, fz_device_gray(ctx), w, h, NULL, 0);
+            for (int row = 0; row < h; ++row)
+                memcpy(fz_pixmap_samples(ctx, gray) + row * fz_pixmap_stride(ctx, gray),
+                       fz_pixmap_samples(ctx, mask) + row * fz_pixmap_stride(ctx, mask), w);
+        }
+        else
+            gray = pdf_color_samples(ctx, mask, fz_device_gray(ctx));
         scaled = fz_scale_pixmap(ctx, gray, 0, 0, (float)width, (float)height, NULL);
         buffer = fz_new_buffer(ctx, (size_t)width * height);
         for (int row = 0; row < height; row++)
@@ -275,25 +333,35 @@ int athanor_pdf_compress(const char *input, const char *output, int dpi, int qua
             {
                 pdf_dict_dels(ctx, object, "PieceInfo");
                 pdf_dict_dels(ctx, object, "Metadata");
-                if (images[i] && widths[i] > 0 && heights[i] > 0)
+                if (images[i] && images[i]->colorspace && widths[i] > 0 && heights[i] > 0)
                 {
                     int w = images[i]->w, h = images[i]->h, nw = 0, nh = 0;
                     size_t length = 0;
-                    fz_color_params colors = {0, 1, 0, 0};
                     pix = fz_get_unscaled_pixmap_from_image(ctx, images[i]);
-                    rgb = fz_convert_pixmap(ctx, pix, fz_device_rgb(ctx), NULL, NULL, colors, 0);
+                    /* An alpha-only decoded image has no colour stream to
+                       recompress. Retain its
+                     * original object and samples. */
+                    if (!fz_pixmap_colorspace(ctx, pix))
+                    {
+                        fz_drop_pixmap(ctx, pix);
+                        pix = NULL;
+                        pdf_drop_obj(ctx, object);
+                        object = NULL;
+                        continue;
+                    }
+                    rgb = pdf_color_samples(ctx, pix, fz_device_rgb(ctx));
                     if (encode(user, fz_pixmap_samples(ctx, rgb), w, h, fz_pixmap_stride(ctx, rgb), widths[i],
                                heights[i], &encoded, &length, &nw, &nh))
                     {
                         raw = pdf_load_raw_stream_number(ctx, doc, i);
                         if (nw != w || nh != h || length < fz_buffer_storage(ctx, raw, NULL))
                         {
+                            if (nw != w || nh != h || fz_pixmap_alpha(ctx, pix))
+                                resize_soft_mask(ctx, doc, object, images[i], pix, nw, nh);
                             pdf_obj *ref = pdf_new_indirect(ctx, doc, i, 0);
                             buffer = fz_new_buffer_from_copied_data(ctx, encoded, length);
                             pdf_update_stream(ctx, doc, ref, buffer, 1);
                             pdf_drop_obj(ctx, ref);
-                            if (nw != w || nh != h)
-                                resize_soft_mask(ctx, doc, object, images[i], nw, nh);
                             pdf_dict_puts_drop(ctx, object, "Width", pdf_new_int(ctx, nw));
                             pdf_dict_puts_drop(ctx, object, "Height", pdf_new_int(ctx, nh));
                             pdf_dict_puts_drop(ctx, object, "BitsPerComponent", pdf_new_int(ctx, 8));
@@ -301,6 +369,7 @@ int athanor_pdf_compress(const char *input, const char *output, int dpi, int qua
                             pdf_dict_put(ctx, object, PDF_NAME(Filter), PDF_NAME(DCTDecode));
                             pdf_dict_dels(ctx, object, "Decode");
                             pdf_dict_dels(ctx, object, "DecodeParms");
+                            pdf_dict_dels(ctx, object, "SMaskInData");
                             fz_drop_buffer(ctx, buffer);
                             buffer = NULL;
                         }

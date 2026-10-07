@@ -18,7 +18,7 @@ ApplicationWindow {
     property color accent: Theme.accent
     property int page: 0
     property alias selectedRow: queuePanel.selectedRow
-    property bool includeSubfolders: false
+    property bool includeSubfolders: true
     palette.window: color
     palette.windowText: fg
     palette.text: fg
@@ -57,7 +57,11 @@ ApplicationWindow {
         height: 42
         spacing: 10
         Image { Layout.preferredWidth: 25; Layout.preferredHeight: 25; sourceSize: Qt.size(50,50); source: "image://icons/brand-mark/"+window.fg.toString().substring(1) }
-        Text { text: "ATHANOR"; color: window.fg; font.pixelSize: 20; font.bold: true }
+        Row {
+            spacing: 10
+            Text { id: brandTitle; text: "ATHANOR"; color: window.fg; font.pixelSize: 20; font.bold: true }
+            Text { anchors.bottom: brandTitle.bottom; text: "v"+backend.version; color: Theme.disabled; font.pixelSize: 12 }
+        }
         Item { Layout.fillWidth: true }
         ActionButton { objectName: "downloadUpdateButton"; text: updater.downloading?"Updating "+updater.progress+"%":"Update available"; visible: updater.availableVersion.length>0; quiet: true; icon: "info"; onClicked: updateNotice.open() }
         ActionButton { objectName: "settingsButton"; Layout.preferredWidth: 42; quiet: true; selected: window.page===1; icon: "settings"; accessibleText: "Settings"; tooltip: "Settings · Ctrl+,"; onClicked: window.showPage(window.page===1 ? 0 : 1) }
@@ -97,7 +101,7 @@ ApplicationWindow {
                         ActionButton { joined: true; large: true; text: "Clear"; icon: "trash"; radius: 16; leftRounded: false; enabled: backend.count>0&&!backend.busy; onClicked: { backend.clear(); window.selectedRow=-1 } }
                     }
                 }
-                Check { text: "Subfolders"; checked: window.includeSubfolders; onToggled: window.includeSubfolders=checked; enabled: true; Layout.alignment: Qt.AlignRight; font.pixelSize: 12 }
+                Check { objectName: "subfoldersCheck"; text: "Subfolders"; Layout.alignment: Qt.AlignRight; checked: window.includeSubfolders; onToggled: window.includeSubfolders=checked }
                 Flickable {
                     id: panelsScroll
                     objectName: "panelsScroll"

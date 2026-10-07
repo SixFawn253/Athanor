@@ -48,7 +48,9 @@ QHash<int, QByteArray> QueueModel::roleNames() const
             {FileSize, "fileSize"},
             {CompressedSize, "compressedSize"},
             {Smaller, "percentSmaller"},
-            {Gained, "gainedSpace"}};
+            {Gained, "gainedSpace"},
+            {FolderGroup, "folderGroup"},
+            {FolderSection, "folderSection"}};
 }
 QVariant QueueModel::data(const QModelIndex &i, int role) const
 {
@@ -57,10 +59,20 @@ QVariant QueueModel::data(const QModelIndex &i, int role) const
     const auto &r = items[i.row()];
     switch (role)
     {
+    case FolderGroup:
+        return r.groupRoot;
+    case FolderSection:
+        return r.groupRoot.isEmpty()
+                   ? QString()
+                   : QString::fromUtf8(
+                         QJsonDocument(
+                             QJsonArray{r.groupRoot,
+                                        QDir(r.groupRoot).relativeFilePath(QFileInfo(r.source).absolutePath())})
+                             .toJson(QJsonDocument::Compact));
     case Source:
         return r.source;
     case Name:
-        return QFileInfo(r.source).fileName();
+        return r.groupRoot.isEmpty() ? QFileInfo(r.source).fileName() : QDir(r.groupRoot).relativeFilePath(r.source);
     case Category:
         return r.category;
     case Status:
@@ -322,6 +334,48 @@ void Controller::addUrls(const QList<QUrl> &urls, bool recursive)
             paths << url.toLocalFile();
     addPaths(paths, recursive);
 }
+QString Controller::version() const
+{
+    return QCoreApplication::applicationVersion();
+}
+int Controller::groupCount(const QString &root) const
+{
+    return int(std::count_if(model.items.cbegin(), model.items.cend(),
+                             [&](const QueueItem &item) { return item.groupRoot == root; }));
+}
+QStringList Controller::queueCategories() const
+{
+    QStringList result;
+    for (const auto &item : model.items)
+        if (!result.contains(item.category))
+            result.append(item.category);
+    return result;
+}
+bool Controller::hasFolders() const
+{
+    return std::any_of(model.items.cbegin(), model.items.cend(),
+                       [](const QueueItem &item) { return !item.groupRoot.isEmpty(); });
+}
+QJsonObject Controller::folderSectionInfo(const QString &key) const
+{
+    const auto parts = QJsonDocument::fromJson(key.toUtf8()).array();
+    if (parts.size() != 2)
+        return {};
+    const QString root = parts[0].toString(), relative = parts[1].toString();
+    QString label = QFileInfo(root).fileName();
+    if (label.isEmpty())
+        label = QDir::toNativeSeparators(root);
+    if (relative != ".")
+        label += " / " + relative;
+    int files = 0;
+    for (const auto &item : model.items)
+        if (item.groupRoot == root && QDir(root).relativeFilePath(QFileInfo(item.source).absolutePath()) == relative)
+            ++files;
+    return {{"label", label},
+            {"path", QDir::cleanPath(QDir(root).filePath(relative))},
+            {"count", files},
+            {"depth", relative == "." ? 0 : relative.count('/') + 1}};
+}
 void Controller::addPaths(const QStringList &paths, bool recursive)
 {
     if (paths.isEmpty())
@@ -360,7 +414,7 @@ void Controller::addPaths(const QStringList &paths, bool recursive)
     });
     watcher->setFuture(QtConcurrent::run([paths, recursive] {
         QVector<QueueItem> rows;
-        QStringList candidates;
+        QVector<QPair<QString, QString>> candidates;
         for (const auto &path : paths)
         {
             QFileInfo info(path);
@@ -369,18 +423,20 @@ void Controller::addPaths(const QStringList &paths, bool recursive)
                 QDirIterator it(path, QDir::Files | QDir::NoDotAndDotDot,
                                 recursive ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags);
                 while (it.hasNext())
-                    candidates << it.next();
+                    candidates.append({it.next(), QDir::cleanPath(info.absoluteFilePath())});
             }
             else
-                candidates << info.absoluteFilePath();
+                candidates.append({info.absoluteFilePath(), QString()});
         }
-        for (const auto &path : candidates)
+        for (const auto &candidate : candidates)
         {
+            const auto &path = candidate.first;
             QString category = Conversion::kind(path);
             if (category.isEmpty() || !QFileInfo(path).isFile())
                 continue;
             QueueItem item;
             item.source = QFileInfo(path).absoluteFilePath();
+            item.groupRoot = candidate.second;
             item.category = category;
             item.before = QFileInfo(path).size();
             if (category == "image")
@@ -397,8 +453,8 @@ void Controller::addPaths(const QStringList &paths, bool recursive)
                 {
                     ChildProcess probe;
                     Platform::setupProcess(&probe);
-                    probe.start(ffprobe, {"-v", "error", "-show_entries", "format=duration:stream=width,height,duration",
-                                          "-of", "json", path});
+                    probe.start(ffprobe, {"-v", "error", "-show_entries",
+                                          "format=duration:stream=width,height,duration", "-of", "json", path});
                     if (probe.waitForFinished(2000) && probe.exitCode() == 0)
                     {
                         const auto info = QJsonDocument::fromJson(probe.readAllStandardOutput()).object();
@@ -521,19 +577,22 @@ void Controller::start()
     nvencRows.clear();
     hardwareLoad = hardwareMonitor.sample();
     workerLimit = opts.autoWorkers
-        ? AdaptiveWorkers::initial(AdaptiveWorkers::ceiling(QThread::idealThreadCount(), opts.threads), hardwareLoad)
-        : opts.batchWorkers;
+                      ? AdaptiveWorkers::initial(AdaptiveWorkers::ceiling(QThread::idealThreadCount(), opts.threads),
+                                                 hardwareLoad)
+                      : opts.batchWorkers;
     batchElapsed.start();
     batchTimer.start();
     pdfGroups.clear();
     pdfMembers.clear();
     if (opts.image == "pdf")
     {
-        QVector<int> images;
+        QMap<QString, QVector<int>> imageFolders;
         for (int i = 0; i < count(); i++)
             if (model.items[i].category == "image")
-                images << i;
-        if (!images.isEmpty())
+                imageFolders[model.items[i].groupRoot.isEmpty() ? QString()
+                                                                : QFileInfo(model.items[i].source).absolutePath()]
+                    << i;
+        for (const auto &images : imageFolders)
         {
             pdfGroups[images.first()] = images;
             for (int i : images)
@@ -563,8 +622,8 @@ void Controller::schedule()
         return;
     int limit = opts.autoWorkers ? workerLimit : opts.batchWorkers;
     for (const auto &r : model.items)
-        if (r.category == "image" && r.status != "Done" && r.status != "Error" &&
-            r.status != "Cancelled" && qint64(r.width) * r.height > 64000000)
+        if (r.category == "image" && r.status != "Done" && r.status != "Error" && r.status != "Cancelled" &&
+            qint64(r.width) * r.height > 64000000)
         {
             limit = 1;
             break;
@@ -609,8 +668,9 @@ void Controller::updateBatchLoad()
         for (const auto pid : gpuProcesses)
             pids.insert(pid);
         hardwareLoad = hardwareMonitor.sample(pids, !nvencRows.isEmpty());
-        workerLimit = AdaptiveWorkers::adjust(workerLimit,
-            AdaptiveWorkers::ceiling(QThread::idealThreadCount(), opts.threads), hardwareLoad, headroomSamples);
+        workerLimit =
+            AdaptiveWorkers::adjust(workerLimit, AdaptiveWorkers::ceiling(QThread::idealThreadCount(), opts.threads),
+                                    hardwareLoad, headroomSamples);
         schedule();
     }
     emit changed();
@@ -620,6 +680,33 @@ void Controller::launch(int row)
     auto *process = new ChildProcess(this);
     QString destinationRoot = opts.output.isEmpty() ? QFileInfo(model.items[row].source).absolutePath()
                                                     : QFileInfo(opts.output).absoluteFilePath();
+    if (!opts.output.isEmpty() && !model.items[row].groupRoot.isEmpty())
+    {
+        const auto &item = model.items[row];
+        const QString relative = QDir(item.groupRoot).relativeFilePath(QFileInfo(item.source).absolutePath());
+        if (QDir::isAbsolutePath(relative) || relative == ".." || relative.startsWith("../"))
+        {
+            model.items[row].status = "Error";
+            model.items[row].warning = "Source path is outside its queued folder";
+            model.update(row);
+            process->deleteLater();
+            failures++;
+            return;
+        }
+        QString rootName = QFileInfo(item.groupRoot).fileName();
+        if (rootName.isEmpty())
+            rootName = "Drive-" + item.groupRoot.left(1);
+        for (const auto &other : model.items)
+            if (!other.groupRoot.isEmpty() && other.groupRoot != item.groupRoot &&
+                QFileInfo(other.groupRoot).fileName().compare(rootName, Qt::CaseInsensitive) == 0)
+            {
+                rootName += "-" + QString::number(qHash(item.groupRoot, 0), 16).right(8);
+                break;
+            }
+        destinationRoot = QDir(destinationRoot).filePath(rootName);
+        if (relative != ".")
+            destinationRoot = QDir(destinationRoot).filePath(relative);
+    }
     QDir().mkpath(destinationRoot);
     auto directory = std::make_shared<Scratch>(destinationRoot + "/.athanor-job-XXXXXX");
     QString job = directory->path() + "/job.json";
@@ -635,6 +722,7 @@ void Controller::launch(int row)
     }
     QString input = rowInput(model.items[row]);
     Options jobOptions = opts;
+    jobOptions.output = destinationRoot;
     if (opts.autoWorkers && opts.threads == 0)
         jobOptions.threads = qBound(1, QThread::idealThreadCount() / qMax(1, workerLimit), 8);
     if (input != model.items[row].source)
@@ -887,10 +975,10 @@ void Controller::launchPreview(const QString &source, int quality, int)
     QString job = previewDirectory->path() + "/job.json";
     QFile file(job);
     const auto jobBytes = QJsonDocument(QJsonObject{{"source", source},
-                                         {"preview", true},
-                                         {"options", options.json()},
-                                         {"scratch", previewDirectory->path()}})
-                   .toJson();
+                                                    {"preview", true},
+                                                    {"options", options.json()},
+                                                    {"scratch", previewDirectory->path()}})
+                              .toJson();
     if (!file.open(QIODevice::WriteOnly) || file.write(jobBytes) != jobBytes.size() || !file.flush())
     {
         previewFailure = "Cannot write preview job";
@@ -1012,12 +1100,21 @@ QJsonObject Controller::queueSummary() const
             remaining = "About " + QString::number(seconds / 3600, 'f', 1) + "h left";
     }
     const qint64 saved = completedBefore - after;
-    return {{"done", done}, {"failed", failed}, {"waiting", waiting}, {"cancelled", cancelledCount},
-            {"warnings", warnings}, {"percent", int(std::round(fraction * 100))},
-            {"saved", sizeText(saved)}, {"saved_bytes", saved}, {"before", sizeText(before)},
+    return {{"done", done},
+            {"failed", failed},
+            {"waiting", waiting},
+            {"cancelled", cancelledCount},
+            {"warnings", warnings},
+            {"percent", int(std::round(fraction * 100))},
+            {"saved", sizeText(saved)},
+            {"saved_bytes", saved},
+            {"before", sizeText(before)},
             {"after", done ? sizeText(after) : QString::fromUtf8("—")},
-            {"smaller", completedBefore > 0 ? QString::number(100.0 * saved / completedBefore, 'f', 1) + "%" : QString::fromUtf8("—")},
-            {"active", active}, {"workers", workerLimit}, {"remaining", remaining}};
+            {"smaller", completedBefore > 0 ? QString::number(100.0 * saved / completedBefore, 'f', 1) + "%"
+                                            : QString::fromUtf8("—")},
+            {"active", active},
+            {"workers", workerLimit},
+            {"remaining", remaining}};
 }
 QJsonObject Controller::rowInfo(int index) const
 {

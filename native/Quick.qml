@@ -6,14 +6,15 @@ ApplicationWindow {
     HoverHandler { onPointChanged: Theme.pointer=point.position; onHoveredChanged: if(!hovered)Theme.pointer=Qt.point(-1000,-1000) }
     visible: true
     width: 520
-    height: 570
+    height: backend.hasFolders ? 620 : 570
     minimumWidth: 500
     minimumHeight: 500
     title: "Athanor"
     color: Theme.canvas
     property color fg: Theme.text
     property color muted: Theme.muted
-    property string category: backend.firstCategory
+    property string selectedCategory: ""
+    property string category: selectedCategory.length ? selectedCategory : backend.firstCategory
     readonly property var summary: backend.queueSummary
     palette.window: color
     palette.windowText: fg
@@ -27,7 +28,8 @@ ApplicationWindow {
         anchors.fill: parent
         anchors.margins: 24
         spacing: 14
-        Text { text: category==="pdf"?"Convert PDF":"Convert file"; color: window.fg; font.pixelSize: 26; font.bold: true }
+        Text { text: backend.hasFolders?"Convert folder":category==="pdf"?"Convert PDF":"Convert file"; color: window.fg; font.pixelSize: 26; font.bold: true }
+        Field { visible: backend.hasFolders&&backend.queueCategories.length>1; Layout.fillWidth: true; model: backend.queueCategories; currentIndex: backend.queueCategories.indexOf(window.category); enabled: !backend.busy; onActivated: function(index){window.selectedCategory=backend.queueCategories[index]} }
         ListView {
             Layout.fillWidth: true
             Layout.fillHeight: true

@@ -11,3 +11,5 @@ void runQueueReuseTest(Controller *, const QString &);
 void runFormatQueueTest(Controller *, const QString &);
 
 void runSchedulingTest(Controller *, const QString &);
+
+void runFolderTest(Controller *, const QString &);

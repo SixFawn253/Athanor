@@ -142,7 +142,7 @@ int main(int argc, char **argv)
 #endif
     Application application(argc, argv);
     application.setApplicationName("Athanor");
-    application.setApplicationVersion("1.4.0");
+    application.setApplicationVersion("0.5.0");
     application.setQuitOnLastWindowClosed(true);
     QImageReader::setAllocationLimit(0);
     QQuickStyle::setStyle("Basic");
@@ -201,6 +201,9 @@ int main(int argc, char **argv)
     QCommandLineOption updateTest("update-test", QString(), "folder");
     updateTest.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(updateTest);
+    QCommandLineOption folderTest("folder-test", QString(), "folder");
+    folderTest.setFlags(QCommandLineOption::HiddenFromHelp);
+    parser.addOption(folderTest);
     parser.process(application);
     if (parser.isSet("platform-test"))
     {
@@ -279,13 +282,18 @@ int main(int argc, char **argv)
         return errors ? 1 : 0;
     }
     if (parser.isSet("qml-check") || parser.isSet("self-test") || parser.isSet("controller-test") || parser.isSet("queue-test") ||
-        parser.isSet("format-queue-test") || parser.isSet("update-test"))
+        parser.isSet("format-queue-test") || parser.isSet("update-test") || parser.isSet("folder-test"))
         qputenv("ATHANOR_TEST", "1");
     bool quick = parser.isSet("quick") || parser.value("target") != "auto";
     Controller controller(quick);
     controller.setTarget(parser.value("target"));
     controller.addPaths(parser.positionalArguments() + application.opened, parser.isSet("include-subfolders"));
     application.filesOpened = [&controller](const QStringList &paths) { controller.addPaths(paths); };
+    if (parser.isSet("folder-test"))
+    {
+        runFolderTest(&controller, parser.value("folder-test"));
+        return application.exec();
+    }
     if (parser.isSet("update-test"))
     {
         qputenv("ATHANOR_TEST", "1");

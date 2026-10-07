@@ -13,6 +13,7 @@
 #include <memory>
 struct QueueItem
 {
+    QString groupRoot;
     QString source, category, status = "Queued", output, warning, completedKey;
     int progress = 0, width = 0, height = 0;
     double duration = 0;
@@ -36,7 +37,9 @@ class QueueModel : public QAbstractListModel
         FileSize,
         CompressedSize,
         Smaller,
-        Gained
+        Gained,
+        FolderGroup,
+        FolderSection
     };
     QVector<QueueItem> items;
     int rowCount(const QModelIndex &parent = {}) const override
@@ -54,6 +57,9 @@ class Controller : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QueueModel *queue READ queue CONSTANT)
+    Q_PROPERTY(QString version READ version CONSTANT)
+    Q_PROPERTY(QStringList queueCategories READ queueCategories NOTIFY changed)
+    Q_PROPERTY(bool hasFolders READ hasFolders NOTIFY changed)
     Q_PROPERTY(int count READ count NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool canConvert READ canConvert NOTIFY changed)
@@ -78,6 +84,7 @@ class Controller : public QObject
     Q_PROPERTY(QString firstCategory READ firstCategory NOTIFY changed)
   public:
     explicit Controller(bool quick = false, QObject *parent = nullptr);
+    QString version() const;
     QueueModel *queue()
     {
         return &model;
@@ -151,6 +158,10 @@ class Controller : public QObject
     Q_INVOKABLE void setOption(const QString &, const QVariant &);
     Q_INVOKABLE void addFiles();
     Q_INVOKABLE void addFolder(bool recursive);
+    Q_INVOKABLE int groupCount(const QString &) const;
+    Q_INVOKABLE QJsonObject folderSectionInfo(const QString &) const;
+    QStringList queueCategories() const;
+    bool hasFolders() const;
     Q_INVOKABLE void addUrls(const QList<QUrl> &, bool recursive = false);
     Q_INVOKABLE void remove(int);
     Q_INVOKABLE void clear();

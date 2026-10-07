@@ -174,7 +174,8 @@ static ProcessResult process(const QString &program, const QStringList &args, Pr
                 if (!gpuConfirmed && !gpuEncoder.isEmpty() && t > 0)
                 {
                     gpuConfirmed = true;
-                    Conversion::writeLine({{"gpu_active", true}, {"gpu_pid", p.processId()}, {"gpu_encoder", gpuEncoder}});
+                    Conversion::writeLine(
+                        {{"gpu_active", true}, {"gpu_pid", p.processId()}, {"gpu_encoder", gpuEncoder}});
                 }
                 if (duration > 0)
                     progress(qBound(2, int(t / duration * 93), 95), "Encoding media");
@@ -366,8 +367,9 @@ static Frames readFrames(const QString &path, bool strict8bit = false)
                 Scratch temp(Platform::scratchPattern("athanor-apng"));
                 if (!temp.isValid())
                     fail("Cannot create animation workspace");
-                auto result = process(tool("ffmpeg"), {"-nostdin", "-hide_banner", "-v", "error", "-i", path, "-fps_mode",
-                                                       "passthrough", "-pix_fmt", "rgba", temp.path() + "/frame-%08d.png"});
+                auto result =
+                    process(tool("ffmpeg"), {"-nostdin", "-hide_banner", "-v", "error", "-i", path, "-fps_mode",
+                                             "passthrough", "-pix_fmt", "rgba", temp.path() + "/frame-%08d.png"});
                 if (result.code)
                     fail(QString::fromUtf8(result.error));
                 auto names = QDir(temp.path()).entryList({"frame-*.png"}, QDir::Files, QDir::Name);
@@ -1029,7 +1031,8 @@ static QByteArray alphaFingerprint(const QString &path, const Options &o, bool o
     if (original && preview)
         args << "-t" << "1";
     filters << "format=rgba" << "alphaextract";
-    args << "-vf" << filters.join(',') << "-fps_mode" << "passthrough" << "-pix_fmt" << "gray" << "-f" << "rawvideo" << file;
+    args << "-vf" << filters.join(',') << "-fps_mode" << "passthrough" << "-pix_fmt" << "gray" << "-f" << "rawvideo"
+         << file;
     auto result = process(tool("ffmpeg"), args);
     if (result.code)
         fail("Transparency decode failed: " + QString::fromUtf8(result.error));
@@ -1478,11 +1481,29 @@ static void pdfProgress(void *pointer, int n, int total)
         state->progress(qBound(3, n * 80 / qMax(1, total), 90), "Optimizing PDF");
 }
 
+static QString pdfReadablePath(const QString &source, const Scratch &workspace)
+{
+#ifdef Q_OS_WIN
+    // The PDF library uses file APIs with a shorter path limit than Qt.
+    if (QFileInfo(source).absoluteFilePath().size() >= 240)
+    {
+        const QString local = workspace.path() + "/input.pdf";
+        if (!QFile::copy(source, local))
+            fail("Cannot prepare PDF input in the temporary workspace");
+        return local;
+    }
+#endif
+    return source;
+}
 static void pdf(const QString &source, const QString &destination, const Options &o, Progress progress)
 {
+    Scratch temp(Platform::scratchPattern("athanor-pdf"));
+    if (!temp.isValid())
+        fail("Cannot create PDF temporary workspace");
+    const QString readableSource = pdfReadablePath(source, temp);
     char error[1024] = {};
     PdfState baseline;
-    auto src = QFile::encodeName(source);
+    auto src = readableSource.toUtf8();
     int count = athanor_pdf_snapshot(src.constData(), pdfRecord, &baseline, error, sizeof(error));
     if (count < 0)
         fail(QString::fromUtf8(error));
@@ -1497,7 +1518,6 @@ static void pdf(const QString &source, const QString &destination, const Options
         profiles << QPair<int, int>{100, 55} << QPair<int, int>{100, 40};
     if (!o.sizeMode && o.pdf == "extreme")
         profiles << QPair<int, int>{72, 60} << QPair<int, int>{72, 40};
-    Scratch temp(QFileInfo(destination).absolutePath() + "/pdf-XXXXXX");
     QString best = source;
     qint64 bestSize = QFileInfo(source).size();
     for (int i = 0; i < profiles.size(); i++)
@@ -1571,7 +1591,9 @@ static int exportPage(void *pointer, const unsigned char *samples, int width, in
 }
 static void imagesPdf(const QStringList &sources, const QString &destination, const Options &o, Progress progress)
 {
-    Scratch temp(QFileInfo(destination).absolutePath() + "/pdf-images-XXXXXX");
+    Scratch temp(Platform::scratchPattern("athanor-pdf-images"));
+    if (!temp.isValid())
+        fail("Cannot create PDF temporary workspace");
     QVector<QByteArray> paths;
     QStringList prepared;
     for (int i = 0; i < sources.size(); i++)
@@ -1609,13 +1631,15 @@ static void imagesPdf(const QStringList &sources, const QString &destination, co
     PdfState state;
     state.progress = progress;
     char error[1024]{};
-    auto dst = destination.toUtf8();
+    auto dst = (temp.path() + "/combined.pdf").toUtf8();
     if (!athanor_pdf_from_images(raw.constData(), raw.size(), dst.constData(), pdfProgress, &state, error,
                                  sizeof(error)))
         fail(QString::fromUtf8(error));
     PdfState check;
     if (athanor_pdf_snapshot(dst.constData(), pdfRecord, &check, error, sizeof(error)) != sources.size())
         fail("Combined PDF page validation failed");
+    if (!QFile::copy(QString::fromUtf8(dst), destination))
+        fail("Cannot save combined PDF");
 }
 
 QJsonObject Conversion::run(const QJsonObject &spec, Progress progress)
@@ -1736,7 +1760,10 @@ QJsonObject Conversion::run(const QJsonObject &spec, Progress progress)
             fail("Cannot prepare PDF page collection");
         PageExport state{stage, {}, o, progress};
         char error[1024]{};
-        auto src = source.toUtf8();
+        Scratch inputWorkspace(Platform::scratchPattern("athanor-pdf-input"));
+        if (!inputWorkspace.isValid())
+            fail("Cannot create PDF temporary workspace");
+        auto src = pdfReadablePath(source, inputWorkspace).toUtf8();
         if (athanor_pdf_render(src.constData(), o.pdfDpi, exportPage, &state, error, sizeof(error)) < 0)
             fail(state.error.isEmpty() ? QString::fromUtf8(error) : state.error);
         collectionBytes = state.bytes;

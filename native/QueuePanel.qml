@@ -97,6 +97,21 @@ Card {
             height: Math.floor(parent.height/42)*42
             clip: true
             model: backend.queue
+            section.property: "folderSection"
+            section.criteria: ViewSection.FullString
+            section.delegate: Item {
+                required property string section
+                readonly property var info: { var revision=backend.queueSummary; return backend.folderSectionInfo(section) }
+                width: table.width-(bar.visible?18:0)
+                height: section.length?42:0
+                visible: section.length>0
+                Rectangle { anchors.fill: parent; color: Theme.header; radius: 8 }
+                RowLayout { anchors.fill: parent; anchors.margins: section.length?10:0
+                    Glyph { name: "folder"; color: Theme.accent; Layout.leftMargin: Math.min(36,(info.depth||0)*12); Layout.preferredWidth: 16; Layout.preferredHeight: 16 }
+                    Text { Layout.fillWidth: true; text: info.label||""; color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideMiddle; ToolTip.visible: groupHover.hovered; ToolTip.text: info.path||""; HoverHandler { id: groupHover } }
+                    Text { text: (info.count||0)+" file(s)"; color: Theme.muted; font.pixelSize: 11 }
+                }
+            }
             currentIndex: panel.selectedRow
             activeFocusOnTab: true
             boundsBehavior: Flickable.StopAtBounds
@@ -119,6 +134,7 @@ Card {
                 required property string gainedSpace
                 width: table.width-(bar.visible?18:0)
                 height: 42
+                visible: y>=table.contentY-0.5 && y+height<=table.contentY+table.height+0.5
                 radius: 8
                 color: panel.selectedRow===index ? Theme.selection : index%2 ? Theme.surfaceAlt : Theme.surface
                 border.width: panel.selectedRow===index&&table.activeFocus ? 1 : 0
