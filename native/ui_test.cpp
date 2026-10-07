@@ -230,7 +230,8 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                         {
                             auto *popupWindow = content->window();
                             popupWindow->grabWindow().save(folder + "/dropdown-popup-light.png");
-                            // Exercise the actual popup delegate through this app's own window.
+                            // Exercise the second row with real pointer events, rather than
+                            // invoking activation directly (which misses click-through bugs).
                             QPointF pos = content->mapToScene(QPointF(80, 60));
                             QMouseEvent press(QEvent::MouseButtonPress, pos, popupWindow->mapToGlobal(pos.toPoint()),
                                               Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
@@ -239,6 +240,14 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
                                                 popupWindow->mapToGlobal(pos.toPoint()), Qt::LeftButton, Qt::NoButton,
                                                 Qt::NoModifier);
                             QCoreApplication::sendEvent(popupWindow, &release);
+                            if (field->property("currentIndex").toInt() != 1 ||
+                                controller->options().value("image").toString() != "webp")
+                                *error += "Dropdown click did not select WebP\n";
+                            if (popup->property("visible").toBool())
+                                *error += "Dropdown did not close after selection\n";
+                            if (controller->options().value("size_mode").toBool() ||
+                                controller->options().value("convert_only").toBool())
+                                *error += "Dropdown click activated an underlying mode control\n";
                         }
                         QMetaObject::invokeMethod(popup, "close");
                     }

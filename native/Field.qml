@@ -51,7 +51,12 @@ ComboBox {
         }
     }
     popup: Popup {
-        popupType: Popup.Window
+        // Keep input routing in the application's overlay on every platform.
+        popupType: Popup.Item
+        modal: true
+        dim: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         x: control.width+6
         y: (control.height-height)/2
         width: Math.max(control.width,190)
