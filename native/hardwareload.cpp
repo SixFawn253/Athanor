@@ -12,6 +12,7 @@
 #endif
 #include <windows.h>
 #include <pdh.h>
+#include <pdhmsg.h>
 #elif defined(Q_OS_MACOS)
 #include <mach/mach.h>
 #include <mach/host_info.h>
