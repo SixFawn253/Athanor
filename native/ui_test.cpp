@@ -68,13 +68,13 @@ void runUiTest(QQmlApplicationEngine *engine, Controller *controller, const QStr
         QJsonObject state;
         for (auto label :
              {"pages", "convertPage", "transitionCover", "queueCard", "queueHeader", "outputCard", "savePath",
-              "browseButton", "progressCell0", "progressTrack0", "progressLabel0", "statusGlyph0"})
+              "browseButton", "overallProgress", "queueOverall", "progressCell0", "progressTrack0", "progressLabel0", "statusGlyph0"})
         {
             auto *item = findVisualItem(window->contentItem(), label);
             if (item)
             {
                 QJsonObject info;
-                for (auto property : {"visible", "x", "y", "width", "height", "currentIndex", "progress", "available"})
+                for (auto property : {"visible", "x", "y", "width", "height", "currentIndex", "progress", "value", "available"})
                     if (item->property(property).isValid())
                         info[property] = QJsonValue::fromVariant(item->property(property));
                 state[label] = info;
@@ -813,4 +813,57 @@ void runFormatQueueTest(Controller *controller, const QString &fixtures)
     });
     controller->addPaths({fixtures + "/willowshore-waldgeist.webp", fixtures + "/artificial.jpg"});
     QTimer::singleShot(20000, controller, [=] { end("Combined PDF queue timed out"); });
+}
+
+void runSchedulingTest(Controller *controller, const QString &fixtures)
+{
+    auto errors = std::make_shared<QString>();
+    auto order = std::make_shared<QVector<int>>();
+    auto finished = std::make_shared<bool>(false);
+    auto end = [=] {
+        if (*finished)
+            return;
+        *finished = true;
+        Conversion::writeLine({{"ok", errors->isEmpty()}, {"error", *errors}});
+        QCoreApplication::exit(errors->isEmpty() ? 0 : 1);
+    };
+    controller->setOption("auto_workers", false);
+    controller->setOption("batch_workers", 1);
+    controller->setOption("image", "png");
+    controller->setOption("output", testOutput("scheduling-check"));
+    QVector<QueueItem> rows;
+    for (int width : {1000, 100, 500})
+    {
+        QueueItem item;
+        item.source = fixtures + "/Apple_first_logo.png";
+        item.category = "image";
+        item.before = QFileInfo(item.source).size();
+        item.width = item.height = width;
+        rows.append(item);
+    }
+    controller->queue()->add(rows);
+    QObject::connect(controller, &Controller::jobStarted, controller, [=](int row) {
+        order->append(row);
+        if (controller->queueSummary().value("active").toInt() != 1)
+            *errors += "Manual worker limit was not respected; ";
+    });
+    QObject::connect(controller, &Controller::batchFinished, controller, [=](int success, int failed, int cancelled) {
+        if (*order != QVector<int>{1, 2, 0})
+            *errors += "Pending jobs did not launch in shortest-job-first order; ";
+        const auto summary = controller->queueSummary();
+        if (success != 3 || failed || cancelled || summary.value("percent").toInt() != 100)
+            *errors += "Completed batch totals or overall progress are incorrect; ";
+        qint64 saved = 0;
+        for (const auto &item : controller->queue()->items)
+            saved += item.before - item.after;
+        if (summary.value("saved_bytes").toInteger() != saved)
+            *errors += "Overall savings were not aggregated; ";
+        end();
+    });
+    QTimer::singleShot(30000, controller, [=] {
+        *errors += "Scheduling test timed out; ";
+        controller->cancel();
+        end();
+    });
+    QTimer::singleShot(0, controller, &Controller::start);
 }

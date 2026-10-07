@@ -9,3 +9,5 @@ void runControllerTest(Controller *, const QString &);
 void runQueueReuseTest(Controller *, const QString &);
 
 void runFormatQueueTest(Controller *, const QString &);
+
+void runSchedulingTest(Controller *, const QString &);

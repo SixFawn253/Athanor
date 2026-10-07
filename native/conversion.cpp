@@ -60,6 +60,7 @@ QJsonObject Options::json() const
             {"crf", crf},
             {"threads", threads},
             {"batch_workers", batchWorkers},
+            {"auto_workers", autoWorkers},
             {"delete", deleteOriginal},
             {"resize_webp", resizeWebp},
             {"size_mode", sizeMode},
@@ -85,6 +86,7 @@ Options Options::fromJson(const QJsonObject &j)
     o.quality = qBound(1, j.value("quality").toInt(o.quality), 100);
     o.crf = qBound(0, j.value("crf").toInt(o.crf), 63);
     o.threads = qBound(0, j.value("threads").toInt(0), 256);
+    o.autoWorkers = j.value("auto_workers").toBool(true);
     o.batchWorkers = qBound(1, j.value("batch_workers").toInt(2), 8);
     o.deleteOriginal = j.value("delete").toBool(false);
     o.resizeWebp = j.value("resize_webp").toBool(false);
@@ -140,7 +142,7 @@ struct ProcessResult
     QByteArray output, error;
 };
 static ProcessResult process(const QString &program, const QStringList &args, Progress progress = {},
-                             double duration = 0)
+                             double duration = 0, const QString &gpuEncoder = {})
 {
     ChildProcess p;
     Platform::setupProcess(&p);
@@ -151,6 +153,7 @@ static ProcessResult process(const QString &program, const QStringList &args, Pr
         fail(p.errorString());
     ProcessResult result;
     QByteArray pending;
+    bool gpuConfirmed = false;
     while (p.state() != QProcess::NotRunning)
     {
         p.waitForReadyRead(60);
@@ -165,13 +168,21 @@ static ProcessResult process(const QString &program, const QStringList &args, Pr
             int n = pending.indexOf('\n');
             auto line = pending.left(n).trimmed();
             pending.remove(0, n + 1);
-            if (progress && duration > 0 && line.startsWith("out_time_us="))
+            if (progress && line.startsWith("out_time_us="))
             {
                 auto t = line.mid(12).toDouble() / 1000000.0;
-                progress(qBound(2, int(t / duration * 93), 95), "Encoding media");
+                if (!gpuConfirmed && !gpuEncoder.isEmpty() && t > 0)
+                {
+                    gpuConfirmed = true;
+                    Conversion::writeLine({{"gpu_active", true}, {"gpu_pid", p.processId()}, {"gpu_encoder", gpuEncoder}});
+                }
+                if (duration > 0)
+                    progress(qBound(2, int(t / duration * 93), 95), "Encoding media");
             }
         }
     }
+    if (gpuConfirmed)
+        Conversion::writeLine({{"gpu_active", false}});
     result.output += p.readAllStandardOutput();
     result.error += p.readAllStandardError();
     result.code = p.exitStatus() == QProcess::NormalExit ? p.exitCode() : -1;
@@ -1227,7 +1238,8 @@ static QString video(const QString &source, const QString &destination, const Op
         }
         args << destination;
         progress(2, "Encoding video · " + encoder);
-        auto r = process(tool("ffmpeg"), args, progress, duration);
+        const bool gpuEncoder = encoder == "av1_nvenc" || encoder == "av1_qsv" || encoder == "av1_amf";
+        auto r = process(tool("ffmpeg"), args, progress, duration, gpuEncoder ? encoder : QString());
         if (r.code == 0 && transparent && !(o.videoLossless && o.video == "mkv") &&
             alphaFingerprint(source, o, true, preview) != alphaFingerprint(destination, o, false, preview))
         {

@@ -142,7 +142,7 @@ int main(int argc, char **argv)
 #endif
     Application application(argc, argv);
     application.setApplicationName("Athanor");
-    application.setApplicationVersion("1.1.1-alpha");
+    application.setApplicationVersion("1.2.1-alpha");
     application.setQuitOnLastWindowClosed(true);
     QImageReader::setAllocationLimit(0);
     QQuickStyle::setStyle("Basic");
@@ -195,6 +195,9 @@ int main(int argc, char **argv)
     QCommandLineOption formatQueueTest("format-queue-test", QString(), "fixtures");
     formatQueueTest.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(formatQueueTest);
+    QCommandLineOption schedulingTest("scheduling-test", QString(), "fixtures");
+    schedulingTest.setFlags(QCommandLineOption::HiddenFromHelp);
+    parser.addOption(schedulingTest);
     QCommandLineOption updateTest("update-test", QString(), "folder");
     updateTest.setFlags(QCommandLineOption::HiddenFromHelp);
     parser.addOption(updateTest);
@@ -305,6 +308,11 @@ int main(int argc, char **argv)
         });
         QTimer::singleShot(0, &updater, &Updater::check);
         QTimer::singleShot(65000, &application, [] { QCoreApplication::exit(3); });
+        return application.exec();
+    }
+    if (parser.isSet("scheduling-test"))
+    {
+        runSchedulingTest(&controller, parser.value("scheduling-test"));
         return application.exec();
     }
     if (parser.isSet("format-queue-test"))

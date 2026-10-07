@@ -35,7 +35,7 @@ Card {
             Text { visible: !backend.busy&&summary.done>0; text: summary.done+" complete"; color: Theme.success; font.pixelSize: 12 }
             Text { visible: summary.warnings>0; text: summary.warnings+" warning"+(summary.warnings===1?"":"s"); color: Theme.warning; font.pixelSize: 12 }
             Text { visible: summary.failed>0; text: summary.failed+" failed"; color: Theme.error; font.pixelSize: 12 }
-            Text { visible: !backend.busy&&summary.done>0; text: summary.saved.startsWith("−")?summary.saved.substring(1)+" larger":summary.saved+" saved"; color: summary.saved.startsWith("−")?Theme.warning:Theme.muted; font.pixelSize: 12 }
+            Text { visible: summary.done>0; text: summary.saved.startsWith("−")?summary.saved.substring(1)+" larger":summary.saved+" saved"; color: summary.saved.startsWith("−")?Theme.warning:Theme.muted; font.pixelSize: 12 }
 
             Item { Layout.fillWidth: true }
             ActionButton { implicitHeight: 28; text: "Open result"; icon: "external"; visible: panel.selectedRow>=0; enabled: !!panel.selectedInfo.hasOutput; tooltip: enabled ? "Open the converted file" : "Available after successful conversion"; onClicked: backend.openOutput(panel.selectedRow) }
@@ -71,6 +71,25 @@ Card {
                     }
                 }
             }
+        }
+        Row {
+            objectName: "queueOverall"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 42
+            Text { width: panel.sizes[0]; height: 42; leftPadding: 4; text: "Overall"; color: Theme.text; font.pixelSize: 12; font.bold: true; verticalAlignment: Text.AlignVCenter }
+            Text { width: panel.sizes[1]; height: 42; rightPadding: 10; text: panel.summary.before; color: Theme.text; font.family: Theme.numericFont; font.pixelSize: 12; horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            Text { width: panel.sizes[2]; height: 42; rightPadding: 10; text: panel.summary.after; color: Theme.text; font.family: Theme.numericFont; font.pixelSize: 12; horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            Text { width: panel.sizes[3]; height: 42; rightPadding: 10; text: panel.summary.smaller; color: Theme.text; font.family: Theme.numericFont; font.pixelSize: 12; horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            Text { width: panel.sizes[4]; height: 42; rightPadding: 10; text: panel.summary.saved; color: Theme.text; font.family: Theme.numericFont; font.pixelSize: 12; horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            Text { width: panel.sizes[5]; height: 42; text: backend.busy ? panel.summary.active+" active" : panel.summary.cancelled>0 ? "Stopped" : panel.summary.failed>0 ? "Errors" : panel.summary.done>0 ? "Complete" : "Ready"; color: Theme.info; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            Item { width: panel.sizes[6]; height: 42
+                ProgressBar { objectName: "overallProgress"; Accessible.name: "Overall queue progress"; anchors.verticalCenter: parent.verticalCenter; width: Math.max(10,parent.width-42); from: 0; to: 100; value: panel.summary.percent
+                    background: Rectangle { implicitHeight: 6; color: Theme.softBorder; radius: 3 }
+                    contentItem: Item { implicitHeight: 6; Rectangle { width: parent.width*parent.parent.visualPosition; height: 6; radius: 3; color: Theme.accent } }
+                }
+                Text { anchors.right: parent.right; anchors.rightMargin: 5; anchors.verticalCenter: parent.verticalCenter; text: panel.summary.percent+"%"; color: Theme.muted; font.family: Theme.numericFont; font.pixelSize: 11 }
+            }
+            Text { width: panel.sizes[7]; height: 42; leftPadding: 6; text: backend.busy ? (panel.summary.remaining || "Estimating time…") : panel.summary.done>0 ? "Totals for completed files" : "Shortest jobs first"; color: Theme.muted; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
         }
         Item {
             Layout.fillWidth: true

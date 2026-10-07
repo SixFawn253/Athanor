@@ -2,6 +2,8 @@
 #include "childprocess.h"
 #include "conversion.h"
 #include "scratch.h"
+#include "hardwareload.h"
+#include <QElapsedTimer>
 #include <QAbstractListModel>
 #include <QJsonObject>
 #include <QSet>
@@ -13,6 +15,7 @@ struct QueueItem
 {
     QString source, category, status = "Queued", output, warning, completedKey;
     int progress = 0, width = 0, height = 0;
+    double duration = 0;
     qint64 before = 0, after = -1;
 };
 class QueueModel : public QAbstractListModel
@@ -170,6 +173,7 @@ class Controller : public QObject
     void changed();
     void themeChanged();
     void batchFinished(int success, int failed, int cancelled);
+    void jobStarted(int row);
     void previewChanged();
     void previewOpened(const QString &, int);
     void filesAdded();
@@ -181,16 +185,26 @@ class Controller : public QObject
     QString theme = "System", message, motionPreference = "System";
     bool systemMotion = true;
     bool contexts = true, compact = false, running = false, cancelling = false;
-    int active = 0, next = 0, successes = 0, failures = 0, cancelled = 0;
+    int active = 0, successes = 0, failures = 0, cancelled = 0;
     QVector<ChildProcess *> processes;
     QSet<QString> seen;
     QHash<int, QVector<int>> pdfGroups;
     QSet<int> pdfMembers;
-    QTimer systemTimer, revealDeadline;
+    QTimer systemTimer, revealDeadline, batchTimer;
+    QElapsedTimer batchElapsed;
+    HardwareMonitor hardwareMonitor;
+    HardwareLoad hardwareLoad;
+    int workerLimit = 1, headroomSamples = 0;
+    QSet<int> batchRows;
+    QHash<int, qint64> gpuProcesses;
+    QSet<int> nvencRows;
+    void updateBatchLoad();
     QString settingsPath;
     bool systemTheme = false;
     void save();
     void schedule();
+    int nextJob() const;
+    double estimatedWork(int row) const;
     void launch(int);
     void finishBatch();
     ChildProcess *previewProcess = nullptr;

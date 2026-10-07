@@ -15,7 +15,7 @@ output = Path(sys.argv[2]).resolve()
 output.mkdir(parents=True, exist_ok=True)
 system = platform.system()
 arch = {"x86_64": "x64", "AMD64": "x64", "aarch64": "arm64", "arm64": "arm64"}[platform.machine()]
-version = "1.1.1"
+version = "1.2.1"
 
 
 def run(*args, **kwargs):

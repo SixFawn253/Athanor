@@ -271,9 +271,10 @@ ApplicationWindow {
                                 Text { text: "Threads (0 = auto)"; color: window.muted; font.pixelSize: 12 }
                                 Field { Layout.fillWidth: true; accessibleLabel: "Encoding speed"; model: ["Fast","Balanced","Smallest"]; currentIndex: model.indexOf(backend.options.speed); enabled: !backend.busy; onActivated: function(index){backend.setOption("speed",model[index]) } }
                                 Field { Layout.fillWidth: true; accessibleLabel: "Video acceleration"; model: ["Auto","CPU"]; currentIndex: backend.options.acceleration==="CPU"?1:0; enabled: !backend.busy; onActivated: function(index){backend.setOption("acceleration",model[index]) } }
-                                Spin { Accessible.name: "Parallel files"; Layout.fillWidth: true; from: 1; to: 8; value: backend.options.batch_workers; enabled: !backend.busy; onValueModified: backend.setOption("batch_workers",value) }
+                                Spin { Accessible.name: "Parallel files"; Layout.fillWidth: true; from: 1; to: 8; value: backend.options.batch_workers; enabled: !backend.busy&&!backend.options.auto_workers; onValueModified: backend.setOption("batch_workers",value) }
                                 Spin { Accessible.name: "CPU threads"; Layout.fillWidth: true; from: 0; to: 256; editable: true; value: backend.options.threads; enabled: !backend.busy; onValueModified: backend.setOption("threads",value) }
-                                Text { Layout.columnSpan: 4; Layout.fillWidth: true; text: "Faster encoding trades some size efficiency for speed. Auto tries GPU AV1 video encoding, then CPU."; color: window.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.topMargin: 8 }
+                                Check { Layout.columnSpan: 4; text: "Automatically adjust parallel files to hardware load"; checked: backend.options.auto_workers; enabled: !backend.busy; onClicked: backend.setOption("auto_workers",checked) }
+                                Text { Layout.columnSpan: 4; Layout.fillWidth: true; text: "Faster encoding trades some size efficiency for speed. Auto tries GPU AV1 video encoding, then CPU. Parallel files adapt to CPU and memory load; GPU load is used only during GPU encoding. Shortest estimated jobs start first."; color: window.muted; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.topMargin: 8 }
                             }
                         }
                     }

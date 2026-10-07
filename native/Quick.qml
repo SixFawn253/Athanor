@@ -14,6 +14,7 @@ ApplicationWindow {
     property color fg: Theme.text
     property color muted: Theme.muted
     property string category: backend.firstCategory
+    readonly property var summary: backend.queueSummary
     palette.window: color
     palette.windowText: fg
     palette.text: fg
@@ -45,6 +46,8 @@ ApplicationWindow {
                 Text { visible: warning.length>0; width: parent.width; text: warning; color: Theme.statusColor(fileStatus,warning); wrapMode: Text.Wrap; font.pixelSize: 12 }
             }
         }
+        ProgressBar { objectName: "overallProgress"; Accessible.name: "Overall queue progress"; Layout.fillWidth: true; from: 0; to: 100; value: window.summary.percent; palette.highlight: Theme.accent }
+        Text { Layout.fillWidth: true; text: window.summary.percent+"% · "+window.summary.saved+" saved"+(backend.busy ? " · "+(window.summary.remaining || "Estimating time…") : ""); color: window.muted; font.pixelSize: 12; elide: Text.ElideRight }
         Card {
             objectName: "outputCard"
             Layout.fillWidth: true

@@ -155,7 +155,7 @@ def main():
         run(binary, root, *cli, "--delete-originals", broken, ok=False)
         assert broken.exists() and source.exists()
         assert not list(output.glob(".athanor-*")), "Temporary output workspaces were left behind"
-        for test in ("--controller-test", "--queue-test", "--format-queue-test"):
+        for test in ("--controller-test", "--queue-test", "--format-queue-test", "--scheduling-test"):
             run(binary, root, test, root)
             print(test, "passed", flush=True)
         print("All conversion, queue, preview, cancellation and publication checks passed", flush=True)

@@ -9,6 +9,7 @@ struct Options
             acceleration = "Auto", output;
     int audioBitrate = 96, pdfDpi = 150;
     int quality = 75, crf = 32, threads = 0, batchWorkers = 2;
+    bool autoWorkers = true;
     bool deleteOriginal = false, resizeWebp = false, sizeMode = false, convertOnly = false, imageLossless = false,
          videoLossless = false;
     qint64 targetBytes = 2000000;

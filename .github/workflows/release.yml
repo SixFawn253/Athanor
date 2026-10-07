@@ -73,8 +73,8 @@ jobs:
           def gh(*args):
               return subprocess.check_output(['gh', *args], text=True)
           for tag, title, notes, paths, latest in [
-              (f'v{version}', f'Alpha {version} — macOS', 'Fixes format selector clicks.\n\nDownload arm64 for Apple Silicon or x64 for Intel. Extract the ZIP and open Athanor.app. The app is ad hoc signed and is not Apple-notarized.', mac, 'false'),
-              (f'alpha-{version}', f'Alpha {version} — Windows', 'Fixes format selector clicks.\n\nDownload and run the Windows x64 EXE.', [windows], 'true')]:
+              (f'v{version}', f'Alpha {version} — macOS', 'Adds overall queue progress and savings, hardware-adaptive parallel conversions and shortest-job-first scheduling. Fixes format selector clicks.\n\nDownload arm64 for Apple Silicon or x64 for Intel. Extract the ZIP and open Athanor.app. The app is ad hoc signed and is not Apple-notarized.', mac, 'false'),
+              (f'alpha-{version}', f'Alpha {version} — Windows', 'Adds overall queue progress and savings, hardware-adaptive parallel conversions and shortest-job-first scheduling. Fixes format selector clicks.\n\nDownload and run the Windows x64 EXE.', [windows], 'true')]:
               gh('release', 'create', tag, '--repo', repo, '--target', sha, '--title', title, '--notes', notes, '--draft')
               gh('release', 'upload', tag, '--repo', repo, *map(str, paths))
               release = json.loads(gh('api', f'repos/{repo}/releases/tags/{tag}'))

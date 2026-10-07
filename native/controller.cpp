@@ -1,5 +1,6 @@
 #include "controller.h"
 #include "platform.h"
+#include "scheduling.h"
 #include <QCoreApplication>
 #include <QFileDialog>
 #include <QFile>
@@ -14,6 +15,8 @@
 #include <QFutureWatcher>
 #include <QImageReader>
 #include <QRegularExpression>
+#include <QThread>
+#include <cmath>
 
 static QString sizeText(qint64 bytes)
 {
@@ -155,6 +158,8 @@ Controller::Controller(bool quick, QObject *parent) : QObject(parent), compact(q
         }
     });
     systemTimer.start();
+    batchTimer.setInterval(2000);
+    connect(&batchTimer, &QTimer::timeout, this, &Controller::updateBatchLoad);
     if (!qEnvironmentVariableIsSet("ATHANOR_TEST"))
         QTimer::singleShot(400, this, [this] {
             QString error;
@@ -342,6 +347,9 @@ void Controller::addPaths(const QStringList &paths, bool recursive)
                 added.append(r);
             }
         }
+        if (running)
+            for (int i = 0; i < added.size(); ++i)
+                batchRows.insert(count() + i);
         model.add(added);
         watcher->deleteLater();
         emit changed();
@@ -382,6 +390,34 @@ void Controller::addPaths(const QStringList &paths, bool recursive)
                 item.width = size.width();
                 item.height = size.height();
             }
+            if (category == "video" || category == "audio")
+            {
+                const auto ffprobe = Platform::toolPath("ffprobe");
+                if (!ffprobe.isEmpty())
+                {
+                    ChildProcess probe;
+                    Platform::setupProcess(&probe);
+                    probe.start(ffprobe, {"-v", "error", "-show_entries", "format=duration:stream=width,height,duration",
+                                          "-of", "json", path});
+                    if (probe.waitForFinished(2000) && probe.exitCode() == 0)
+                    {
+                        const auto info = QJsonDocument::fromJson(probe.readAllStandardOutput()).object();
+                        item.duration = info.value("format").toObject().value("duration").toString().toDouble();
+                        for (const auto &value : info.value("streams").toArray())
+                        {
+                            const auto stream = value.toObject();
+                            item.width = qMax(item.width, stream.value("width").toInt());
+                            item.height = qMax(item.height, stream.value("height").toInt());
+                            item.duration = qMax(item.duration, stream.value("duration").toString().toDouble());
+                        }
+                    }
+                    else
+                    {
+                        probe.kill();
+                        probe.waitForFinished(1000);
+                    }
+                }
+            }
             rows.append(item);
         }
         return rows;
@@ -405,6 +441,7 @@ void Controller::clear()
         return;
     queueGeneration++;
     model.clear();
+    batchRows.clear();
     seen.clear();
     emit changed();
 }
@@ -475,9 +512,19 @@ void Controller::start()
     closePreview();
     running = true;
     cancelling = false;
-    next = 0;
     successes = failures = cancelled = 0;
     message.clear();
+    batchRows.clear();
+    headroomSamples = 0;
+    hardwareMonitor.reset();
+    gpuProcesses.clear();
+    nvencRows.clear();
+    hardwareLoad = hardwareMonitor.sample();
+    workerLimit = opts.autoWorkers
+        ? AdaptiveWorkers::initial(AdaptiveWorkers::ceiling(QThread::idealThreadCount(), opts.threads), hardwareLoad)
+        : opts.batchWorkers;
+    batchElapsed.start();
+    batchTimer.start();
     pdfGroups.clear();
     pdfMembers.clear();
     if (opts.image == "pdf")
@@ -500,6 +547,7 @@ void Controller::start()
     for (int i = 0; i < count(); i++)
         if (needsConversion(model.items[i]))
         {
+            batchRows.insert(i);
             model.items[i].status = "Queued";
             model.items[i].progress = 0;
             model.items[i].after = -1;
@@ -513,21 +561,59 @@ void Controller::schedule()
 {
     if (!running)
         return;
-    int limit = opts.batchWorkers;
+    int limit = opts.autoWorkers ? workerLimit : opts.batchWorkers;
     for (const auto &r : model.items)
-        if (r.category == "image" && qint64(r.width) * r.height > 64000000)
+        if (r.category == "image" && r.status != "Done" && r.status != "Error" &&
+            r.status != "Cancelled" && qint64(r.width) * r.height > 64000000)
         {
             limit = 1;
             break;
         }
-    while (!cancelling && active < limit && next < count())
+    workerLimit = limit;
+    while (!cancelling && active < limit)
     {
-        int row = next++;
-        if (needsConversion(model.items[row]) && !pdfMembers.contains(row))
-            launch(row);
+        int row = nextJob();
+        if (row < 0)
+            break;
+        launch(row);
     }
-    if (active == 0 && (cancelling || next >= count()))
+    if (active == 0 && (cancelling || nextJob() < 0))
         finishBatch();
+}
+double Controller::estimatedWork(int row) const
+{
+    const auto &item = model.items[row];
+    return Scheduling::work(item.category, item.before, item.width, item.height, item.duration, opts);
+}
+int Controller::nextJob() const
+{
+    QVector<QPair<int, double>> candidates;
+    for (int row = 0; row < count(); ++row)
+        if (model.items[row].status == "Queued" && needsConversion(model.items[row]) && !pdfMembers.contains(row))
+        {
+            double work = estimatedWork(row);
+            for (int member : pdfGroups.value(row))
+                if (member != row)
+                    work += estimatedWork(member);
+            candidates.append({row, work});
+        }
+    return Scheduling::shortestJob(candidates);
+}
+void Controller::updateBatchLoad()
+{
+    if (!running || cancelling)
+        return;
+    if (opts.autoWorkers)
+    {
+        QSet<qint64> pids;
+        for (const auto pid : gpuProcesses)
+            pids.insert(pid);
+        hardwareLoad = hardwareMonitor.sample(pids, !nvencRows.isEmpty());
+        workerLimit = AdaptiveWorkers::adjust(workerLimit,
+            AdaptiveWorkers::ceiling(QThread::idealThreadCount(), opts.threads), hardwareLoad, headroomSamples);
+        schedule();
+    }
+    emit changed();
 }
 void Controller::launch(int row)
 {
@@ -549,6 +635,8 @@ void Controller::launch(int row)
     }
     QString input = rowInput(model.items[row]);
     Options jobOptions = opts;
+    if (opts.autoWorkers && opts.threads == 0)
+        jobOptions.threads = qBound(1, QThread::idealThreadCount() / qMax(1, workerLimit), 8);
     if (input != model.items[row].source)
         jobOptions.deleteOriginal = false;
     QVector<int> group = pdfGroups.value(row, {row});
@@ -575,6 +663,8 @@ void Controller::launch(int row)
     active++;
     model.items[row].status = "Starting";
     model.update(row);
+    emit jobStarted(row);
+    emit changed();
     const QString requestedKey = conversionKey(model.items[row], opts);
     auto pending = std::make_shared<QByteArray>();
     auto final = std::make_shared<QJsonObject>();
@@ -588,6 +678,20 @@ void Controller::launch(int row)
             pending->remove(0, n + 1);
             if (obj.contains("ok"))
                 *final = obj;
+            else if (obj.contains("gpu_active"))
+            {
+                if (obj.value("gpu_active").toBool())
+                {
+                    gpuProcesses[row] = obj.value("gpu_pid").toInteger();
+                    if (obj.value("gpu_encoder").toString() == "av1_nvenc")
+                        nvencRows.insert(row);
+                }
+                else
+                {
+                    gpuProcesses.remove(row);
+                    nvencRows.remove(row);
+                }
+            }
             else if (obj.contains("percent"))
             {
                 model.items[row].progress = obj.value("percent").toInt();
@@ -668,6 +772,8 @@ void Controller::launch(int row)
             }
         }
         model.update(row);
+        gpuProcesses.remove(row);
+        nvencRows.remove(row);
         active--;
         processes.removeOne(process);
         process->deleteLater();
@@ -687,7 +793,7 @@ void Controller::cancel()
     if (!busy())
         return;
     cancelling = true;
-    for (int row = next; row < count(); row++)
+    for (int row = 0; row < count(); row++)
         if (model.items[row].status == "Queued")
         {
             model.items[row].status = "Cancelled";
@@ -702,6 +808,7 @@ void Controller::cancel()
 void Controller::finishBatch()
 {
     running = false;
+    batchTimer.stop();
     message = QString("%1 converted%2%3")
                   .arg(successes)
                   .arg(failures ? QString(" · %1 failed").arg(failures) : QString())
@@ -867,24 +974,50 @@ bool Controller::reducedMotion() const
 }
 QJsonObject Controller::queueSummary() const
 {
-    int done = 0, failed = 0, waiting = 0, percent = 0, warnings = 0;
-    qint64 saved = 0;
-    for (const auto &row : model.items)
+    int done = 0, failed = 0, waiting = 0, warnings = 0, cancelledCount = 0;
+    qint64 before = 0, completedBefore = 0, after = 0;
+    double totalWork = 0, completedWork = 0;
+    for (int i = 0; i < count(); ++i)
     {
+        const auto &row = model.items[i];
         done += row.status == "Done";
         failed += row.status == "Error";
+        cancelledCount += row.status == "Cancelled";
         waiting += row.status == "Queued";
         warnings += !row.warning.isEmpty() && row.status != "Error";
-        percent += row.progress;
+        before += qMax<qint64>(0, row.before);
         if (row.status == "Done" && row.after >= 0)
-            saved += row.before - row.after;
+        {
+            completedBefore += row.before;
+            after += row.after;
+        }
+        if (!running || batchRows.contains(i))
+        {
+            const double work = estimatedWork(i);
+            totalWork += work;
+            const int progress = row.status == "Error" ? 100 : qBound(0, row.progress, 100);
+            completedWork += work * progress / 100.0;
+        }
     }
-    return {{"done", done},
-            {"failed", failed},
-            {"waiting", waiting},
-            {"warnings", warnings},
-            {"percent", count() ? percent / count() : 0},
-            {"saved", sizeText(saved)}};
+    const double fraction = totalWork > 0 ? qBound(0.0, completedWork / totalWork, 1.0) : 0;
+    QString remaining;
+    if (running && !cancelling && batchElapsed.isValid() && batchElapsed.elapsed() >= 10000 && fraction > .005)
+    {
+        const double seconds = batchElapsed.elapsed() / 1000.0 * (1 - fraction) / fraction;
+        if (seconds < 60)
+            remaining = "About " + QString::number(qMax(1, int(std::ceil(seconds)))) + "s left";
+        else if (seconds < 3600)
+            remaining = "About " + QString::number(int(std::ceil(seconds / 60))) + "m left";
+        else
+            remaining = "About " + QString::number(seconds / 3600, 'f', 1) + "h left";
+    }
+    const qint64 saved = completedBefore - after;
+    return {{"done", done}, {"failed", failed}, {"waiting", waiting}, {"cancelled", cancelledCount},
+            {"warnings", warnings}, {"percent", int(std::round(fraction * 100))},
+            {"saved", sizeText(saved)}, {"saved_bytes", saved}, {"before", sizeText(before)},
+            {"after", done ? sizeText(after) : QString::fromUtf8("—")},
+            {"smaller", completedBefore > 0 ? QString::number(100.0 * saved / completedBefore, 'f', 1) + "%" : QString::fromUtf8("—")},
+            {"active", active}, {"workers", workerLimit}, {"remaining", remaining}};
 }
 QJsonObject Controller::rowInfo(int index) const
 {

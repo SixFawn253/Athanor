@@ -55,7 +55,6 @@ ComboBox {
         popupType: Popup.Item
         modal: true
         dim: false
-        focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         x: control.width+6
         y: (control.height-height)/2
