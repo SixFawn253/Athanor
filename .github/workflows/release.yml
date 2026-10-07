@@ -1,0 +1,89 @@
+name: Publish platform releases
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful cross-platform build run ID
+        required: true
+        type: string
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: publish-releases
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Verify build
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          repo = os.environ['GITHUB_REPOSITORY']
+          run_id = os.environ['BUILD_RUN_ID']
+          assert re.fullmatch(r'\d+', run_id), 'Invalid build run ID'
+          run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/actions/runs/{run_id}']))
+          assert run['conclusion'] == 'success', 'Build must pass all platform checks'
+          assert run['head_branch'] == 'main' and run['event'] in ('push', 'workflow_dispatch')
+          assert run['path'] == '.github/workflows/cross-platform.yml'
+          assert run['head_repository']['full_name'] == repo
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('sha=' + run['head_sha'] + '\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.build.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.build_run_id }}
+          pattern: '*'
+          path: artifacts
+      - name: Verify packages and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess, zipfile
+          repo = os.environ['GITHUB_REPOSITORY']
+          version = re.search(r'project\(Athanor VERSION ([\d.]+)', pathlib.Path('native/CMakeLists.txt').read_text())[1]
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          root = pathlib.Path('artifacts')
+          def package(name):
+              matches = list(root.rglob(name))
+              assert len(matches) == 1, f'Expected one {name}'
+              path = matches[0]
+              assert path.stat().st_size > 1000000
+              return path
+          windows = package(f'Athanor-Alpha-{version}-Windows-x64.exe')
+          assert windows.open('rb').read(2) == b'MZ'
+          mac = [package(f'Athanor-Alpha-{version}-macOS-{arch}.zip') for arch in ('arm64', 'x64')]
+          for path in mac:
+              with zipfile.ZipFile(path) as archive:
+                  assert archive.testzip() is None
+                  assert any(name.endswith('Athanor.app/Contents/MacOS/Athanor') for name in archive.namelist())
+          for path in [windows, *mac]:
+              print(path.name, hashlib.sha256(path.read_bytes()).hexdigest())
+          def gh(*args):
+              return subprocess.check_output(['gh', *args], text=True)
+          for tag, title, notes, paths, latest in [
+              (f'v{version}', f'Alpha {version} — macOS', 'Fixes format selector clicks.\n\nDownload arm64 for Apple Silicon or x64 for Intel. Extract the ZIP and open Athanor.app. The app is ad hoc signed and is not Apple-notarized.', mac, 'false'),
+              (f'alpha-{version}', f'Alpha {version} — Windows', 'Fixes format selector clicks.\n\nDownload and run the Windows x64 EXE.', [windows], 'true')]:
+              gh('release', 'create', tag, '--repo', repo, '--target', sha, '--title', title, '--notes', notes, '--draft')
+              gh('release', 'upload', tag, '--repo', repo, *map(str, paths))
+              release = json.loads(gh('api', f'repos/{repo}/releases/tags/{tag}'))
+              assets = {a['name']: a for a in release['assets']}
+              assert set(assets) == {p.name for p in paths}
+              for path in paths:
+                  asset = assets[path.name]
+                  assert asset['state'] == 'uploaded'
+                  assert asset['size'] == path.stat().st_size
+                  assert asset['digest'] == 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+              gh('release', 'edit', tag, '--repo', repo, '--draft=false', f'--latest={latest}')
+          PY
